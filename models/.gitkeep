@@ -1,0 +1,21 @@
+# Whisper Models
+
+Сюда автоматически скачиваются модели при первом запуске.
+
+## Структура после скачивания
+
+```
+models/
+├── large-v3-turbo/    # Основная модель (~1.5 GB)
+│   ├── config.json
+│   ├── model.bin
+│   ├── tokenizer.json
+│   └── vocabulary.txt
+└── medium/            # Для режима перевода (опционально)
+```
+
+## Ручное скачивание
+
+Если автоскачивание не работает:
+- large-v3-turbo: https://huggingface.co/Systran/faster-whisper-large-v3-turbo
+- medium: https://huggingface.co/Systran/faster-whisper-medium
