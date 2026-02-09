@@ -1,0 +1,15 @@
+# Python 3.11 Embeddable
+
+Эта папка должна содержать портативный Python 3.11.
+
+## Установка
+
+1. Скачай: https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip
+2. Распакуй содержимое сюда
+3. Открой `python311._pth`, раскомментируй `#import site`
+4. Установи pip:
+   ```
+   curl -O https://bootstrap.pypa.io/get-pip.py
+   python.exe get-pip.py
+   ```
+5. Вернись в корень проекта и запусти `install_local.bat`

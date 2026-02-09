@@ -1,0 +1,24 @@
+.env
+__pycache__/
+*.pyc
+.claude/
+.claude_settings.json
+CLAUDE.md
+
+# Auto Claude data directory
+.auto-claude/
+
+# Python embeddable (keep folder structure, ignore contents)
+python311/*
+!python311/.gitkeep
+
+# Whisper models (keep folder structure, ignore contents)
+models/*
+!models/.gitkeep
+
+# User config (window position, etc.)
+config.json
+
+# Error logs
+logs/
+
