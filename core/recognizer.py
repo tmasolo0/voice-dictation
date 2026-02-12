@@ -28,6 +28,12 @@ class SpeechRecognizer:
         self._beam_size = config.get('recognition', 'beam_size', default=5)
         self._language = config.get('recognition', 'language', default='auto')
 
+        # Параметры качества транскрипции
+        self._temperature = config.get('recognition', 'temperature', default=0.3)
+        self._compression_ratio_threshold = config.get('recognition', 'compression_ratio_threshold', default=2.4)
+        self._log_prob_threshold = config.get('recognition', 'log_prob_threshold', default=-1.0)
+        self._no_speech_threshold = config.get('recognition', 'no_speech_threshold', default=0.6)
+
         # Путь к модели
         self._model_path = PROJECT_ROOT / "models" / self._model_size
 
@@ -96,6 +102,10 @@ class SpeechRecognizer:
             initial_prompt=config.get_initial_prompt(),
             condition_on_previous_text=False,
             beam_size=self._beam_size,
+            temperature=self._temperature,
+            compression_ratio_threshold=self._compression_ratio_threshold,
+            log_prob_threshold=self._log_prob_threshold,
+            no_speech_threshold=self._no_speech_threshold,
         )
 
         # Собираем текст из сегментов
@@ -134,6 +144,10 @@ class SpeechRecognizer:
             initial_prompt=config.get_initial_prompt(),
             condition_on_previous_text=False,
             beam_size=self._beam_size,
+            temperature=self._temperature,
+            compression_ratio_threshold=self._compression_ratio_threshold,
+            log_prob_threshold=self._log_prob_threshold,
+            no_speech_threshold=self._no_speech_threshold,
         )
 
         text = "".join([segment.text for segment in segments])
@@ -163,3 +177,9 @@ class SpeechRecognizer:
         self._beam_size = config.get('recognition', 'beam_size', default=5)
         self._language = config.get('recognition', 'language', default='auto')
         self._model_path = PROJECT_ROOT / "models" / self._model_size
+
+        # Параметры качества транскрипции
+        self._temperature = config.get('recognition', 'temperature', default=0.3)
+        self._compression_ratio_threshold = config.get('recognition', 'compression_ratio_threshold', default=2.4)
+        self._log_prob_threshold = config.get('recognition', 'log_prob_threshold', default=-1.0)
+        self._no_speech_threshold = config.get('recognition', 'no_speech_threshold', default=0.6)
