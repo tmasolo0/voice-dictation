@@ -30,9 +30,14 @@ class SpeechRecognizer:
 
         # Параметры качества транскрипции
         self._temperature = config.get('recognition', 'temperature', default=0.3)
+        self._condition_on_previous_text = config.get('recognition', 'condition_on_previous_text', default=False)
         self._compression_ratio_threshold = config.get('recognition', 'compression_ratio_threshold', default=2.4)
         self._log_prob_threshold = config.get('recognition', 'log_prob_threshold', default=-1.0)
         self._no_speech_threshold = config.get('recognition', 'no_speech_threshold', default=0.6)
+        self._repetition_penalty = config.get('recognition', 'repetition_penalty', default=1.2)
+        self._no_repeat_ngram_size = config.get('recognition', 'no_repeat_ngram_size', default=3)
+        self._suppress_tokens = config.get('recognition', 'suppress_tokens', default=[-1])
+        self._hallucination_silence_threshold = config.get('recognition', 'hallucination_silence_threshold', default=2.0)
 
         # Путь к модели
         self._model_path = PROJECT_ROOT / "models" / self._model_size
@@ -100,12 +105,16 @@ class SpeechRecognizer:
             language=lang_param,
             vad_filter=vad_filter,
             initial_prompt=config.get_initial_prompt(),
-            condition_on_previous_text=False,
+            condition_on_previous_text=self._condition_on_previous_text,
             beam_size=self._beam_size,
             temperature=self._temperature,
             compression_ratio_threshold=self._compression_ratio_threshold,
             log_prob_threshold=self._log_prob_threshold,
             no_speech_threshold=self._no_speech_threshold,
+            repetition_penalty=self._repetition_penalty,
+            no_repeat_ngram_size=self._no_repeat_ngram_size,
+            suppress_tokens=self._suppress_tokens,
+            hallucination_silence_threshold=self._hallucination_silence_threshold,
         )
 
         # Собираем текст из сегментов
@@ -142,12 +151,16 @@ class SpeechRecognizer:
             language=lang_param,
             vad_filter=vad_filter,
             initial_prompt=config.get_initial_prompt(),
-            condition_on_previous_text=False,
+            condition_on_previous_text=self._condition_on_previous_text,
             beam_size=self._beam_size,
             temperature=self._temperature,
             compression_ratio_threshold=self._compression_ratio_threshold,
             log_prob_threshold=self._log_prob_threshold,
             no_speech_threshold=self._no_speech_threshold,
+            repetition_penalty=self._repetition_penalty,
+            no_repeat_ngram_size=self._no_repeat_ngram_size,
+            suppress_tokens=self._suppress_tokens,
+            hallucination_silence_threshold=self._hallucination_silence_threshold,
         )
 
         text = "".join([segment.text for segment in segments])
@@ -180,6 +193,11 @@ class SpeechRecognizer:
 
         # Параметры качества транскрипции
         self._temperature = config.get('recognition', 'temperature', default=0.3)
+        self._condition_on_previous_text = config.get('recognition', 'condition_on_previous_text', default=False)
         self._compression_ratio_threshold = config.get('recognition', 'compression_ratio_threshold', default=2.4)
         self._log_prob_threshold = config.get('recognition', 'log_prob_threshold', default=-1.0)
         self._no_speech_threshold = config.get('recognition', 'no_speech_threshold', default=0.6)
+        self._repetition_penalty = config.get('recognition', 'repetition_penalty', default=1.2)
+        self._no_repeat_ngram_size = config.get('recognition', 'no_repeat_ngram_size', default=3)
+        self._suppress_tokens = config.get('recognition', 'suppress_tokens', default=[-1])
+        self._hallucination_silence_threshold = config.get('recognition', 'hallucination_silence_threshold', default=2.0)

@@ -11,6 +11,7 @@ from typing import Any
 # Путь к config.json — в корне проекта (parent от core/)
 PROJECT_ROOT = Path(__file__).parent.parent
 CONFIG_FILE = PROJECT_ROOT / "config.json"
+DICTIONARY_FILE = PROJECT_ROOT / "dictionary.txt"
 CONFIG_VERSION = 2
 
 DEFAULT_CONFIG = {
@@ -26,14 +27,17 @@ DEFAULT_CONFIG = {
         "device": "cuda",
         "compute_type": "float16",
         "language": "auto",
-        "beam_size": 5,
-        "custom_terms": [
-            "Claude Code", "VS Code", "Visual Studio Code", "file manager",
-            "Git", "GitHub", "Python", "JavaScript", "TypeScript",
-            "terminal", "commit", "push", "pull", "merge", "branch",
-            "npm", "pip", "Docker", "API", "JSON", "SQL", "README", "config",
-            "Whisper", "PyQt", "widget", "hotkey", "Ctrl", "Shift", "Alt"
-        ]
+        # --- Параметры качества транскрипции ---
+        "beam_size": 5,                         # Ширина beam search (больше = точнее, медленнее)
+        "temperature": 0.3,                     # Температура сэмплирования (0 = жадный декодинг)
+        "condition_on_previous_text": False,     # Контекст предыдущего сегмента (False для push-to-talk)
+        "compression_ratio_threshold": 2.4,     # Порог сжатия — фильтр повторяющегося текста
+        "log_prob_threshold": -1.0,             # Порог логарифма вероятности — фильтр низкой уверенности
+        "no_speech_threshold": 0.6,             # Порог «нет речи» — пропуск тихих сегментов
+        "repetition_penalty": 1.2,              # Штраф за повторение токенов (>1.0 = штраф)
+        "no_repeat_ngram_size": 3,              # Запрет повтора N-грамм подряд
+        "suppress_tokens": [-1],                # Подавление не-речевых токенов (-1 = дефолтный набор)
+        "hallucination_silence_threshold": 2.0  # Фильтр галлюцинаций на тишине (секунды)
     },
     "system": {
         "autostart": False,
@@ -139,9 +143,16 @@ class ConfigManager:
             print(f"Ошибка сохранения конфига: {e}")
 
     def get_initial_prompt(self) -> str:
-        """Собирает custom_terms в строку для initial_prompt."""
-        terms = self.get('recognition', 'custom_terms', default=[])
-        return ", ".join(terms)
+        """Собирает термины из dictionary.txt в строку для initial_prompt."""
+        if not DICTIONARY_FILE.exists():
+            return ""
+        try:
+            text = DICTIONARY_FILE.read_text(encoding='utf-8')
+            terms = [line.strip() for line in text.splitlines() if line.strip()]
+            return ", ".join(terms)
+        except IOError as e:
+            print(f"Ошибка чтения словаря: {e}")
+            return ""
 
     def reload(self):
         """Перезагрузка конфигурации из файла."""

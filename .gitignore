@@ -16,9 +16,6 @@ python311/*
 models/*
 !models/.gitkeep
 
-# User config (window position, etc.)
-config.json
-
 # Error logs
 logs/
 

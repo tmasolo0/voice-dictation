@@ -412,8 +412,12 @@ class DictationWidget(QWidget):
                     audio_np,
                     task="translate",
                     vad_filter=True,
-                    condition_on_previous_text=False,
+                    condition_on_previous_text=config.get('recognition', 'condition_on_previous_text', default=False),
                     beam_size=BEAM_SIZE,
+                    repetition_penalty=config.get('recognition', 'repetition_penalty', default=1.2),
+                    no_repeat_ngram_size=config.get('recognition', 'no_repeat_ngram_size', default=3),
+                    suppress_tokens=config.get('recognition', 'suppress_tokens', default=[-1]),
+                    hallucination_silence_threshold=config.get('recognition', 'hallucination_silence_threshold', default=2.0),
                 )
             else:
                 # Обычная транскрипция (автоопределение языка)
@@ -421,8 +425,16 @@ class DictationWidget(QWidget):
                     audio_np,
                     vad_filter=True,
                     initial_prompt=config.get_initial_prompt(),
-                    condition_on_previous_text=False,
+                    condition_on_previous_text=config.get('recognition', 'condition_on_previous_text', default=False),
                     beam_size=BEAM_SIZE,
+                    temperature=config.get('recognition', 'temperature', default=0.3),
+                    compression_ratio_threshold=config.get('recognition', 'compression_ratio_threshold', default=2.4),
+                    log_prob_threshold=config.get('recognition', 'log_prob_threshold', default=-1.0),
+                    no_speech_threshold=config.get('recognition', 'no_speech_threshold', default=0.6),
+                    repetition_penalty=config.get('recognition', 'repetition_penalty', default=1.2),
+                    no_repeat_ngram_size=config.get('recognition', 'no_repeat_ngram_size', default=3),
+                    suppress_tokens=config.get('recognition', 'suppress_tokens', default=[-1]),
+                    hallucination_silence_threshold=config.get('recognition', 'hallucination_silence_threshold', default=2.0),
                 )
 
             text = "".join([segment.text for segment in segments]).strip()

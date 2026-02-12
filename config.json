@@ -1,0 +1,49 @@
+{
+  "version": 2,
+  "widget": {
+    "position": {
+      "x": 3155,
+      "y": 140
+    },
+    "size": 121,
+    "hide_in_fullscreen": true
+  },
+  "recognition": {
+    "hotkey": "f9",
+    "model": "large-v3-turbo",
+    "device": "cuda",
+    "compute_type": "float16",
+    "language": "auto",
+    "beam_size": 5,
+    "temperature": 0.3,
+    "condition_on_previous_text": false,
+    "compression_ratio_threshold": 2.4,
+    "log_prob_threshold": -1.0,
+    "no_speech_threshold": 0.6,
+    "repetition_penalty": 1.2,
+    "no_repeat_ngram_size": 3,
+    "suppress_tokens": [-1],
+    "hallucination_silence_threshold": 2.0
+  },
+  "system": {
+    "autostart": false,
+    "start_minimized": false
+  },
+  "openai": {
+    "model": "gpt-3.5-turbo",
+    "max_tokens": 300
+  },
+  "vad": {
+    "threshold": 0.5,
+    "min_speech_ms": 250,
+    "min_silence_ms": 500
+  },
+  "tts": {
+    "engine": "xtts",
+    "device": "cuda",
+    "reference_audio": "voices/samples/ru_svetlana_short.wav",
+    "language": "ru",
+    "speed": 1.15,
+    "temperature": 0.65
+  }
+}
