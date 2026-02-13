@@ -1,7 +1,9 @@
 """ModelManager — управление моделью Whisper."""
 
 import gc
+import sys
 import time
+import traceback
 import threading
 from pathlib import Path
 from faster_whisper import WhisperModel
@@ -49,43 +51,62 @@ class ModelManager:
         """Фоновая загрузка: выгрузить старую, загрузить новую (safe swap для VRAM)."""
         try:
             print(f"Загрузка модели {model_name}...")
+            sys.stdout.flush()
 
             device = self._config.get('recognition', 'device', default='cuda')
             compute_type = self._config.get('recognition', 'compute_type', default='float16')
 
             # Выгрузить старую модель ДО загрузки новой (предотвращает OOM)
+            print("[1] Захват lock, извлечение старой модели...")
+            sys.stdout.flush()
             with self._lock:
                 old_model = self._model
                 self._model = None
 
             if old_model is not None:
+                print(f"[2] del old_model (refs: {sys.getrefcount(old_model) - 1})...")
+                sys.stdout.flush()
                 del old_model
+                print("[3] gc.collect()...")
+                sys.stdout.flush()
                 gc.collect()
-                gc.collect()  # Второй проход для weak-refs и C++ деструкторов
+                gc.collect()
                 try:
                     import torch
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
+                        print("[4] torch.cuda.empty_cache() done")
                 except ImportError:
-                    pass
-                # Пауза: CTranslate2 освобождает CUDA memory асинхронно
+                    print("[4] torch not available, skip")
+                sys.stdout.flush()
                 time.sleep(1)
-                print("Старая модель выгружена из VRAM")
+                print("[5] Старая модель выгружена из VRAM")
+                sys.stdout.flush()
+            else:
+                print("[2-5] Старая модель отсутствует, пропуск очистки")
+                sys.stdout.flush()
 
             local_path = MODELS_DIR / model_name
             model_path = str(local_path) if local_path.exists() else model_name
+            print(f"[6] Создание WhisperModel({model_path}, {device}, {compute_type})...")
+            sys.stdout.flush()
 
             new_model = WhisperModel(model_path, device=device, compute_type=compute_type)
 
+            print("[7] Модель создана, сохранение...")
+            sys.stdout.flush()
             with self._lock:
                 self._model = new_model
                 self._model_name = model_name
 
             print(f"Модель {model_name} загружена ({device})")
+            sys.stdout.flush()
             self._loading = False
             self._bus.model_load_finished.emit(model_name)
 
         except Exception as e:
             print(f"Ошибка загрузки модели: {e}")
+            traceback.print_exc()
+            sys.stdout.flush()
             self._loading = False
             self._bus.model_load_failed.emit(str(e))
