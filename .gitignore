@@ -19,6 +19,9 @@ models/*
 # Planning docs (local only)
 .planning/
 
+# User config (created automatically on first run)
+config.json
+
 # Error logs
 logs/
 
