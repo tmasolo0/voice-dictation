@@ -99,6 +99,10 @@ class Application:
 
     def _on_mode_changed(self, key, value):
         """Централизованная обработка переключения режимов."""
+        if key == "open_model_manager":
+            self._open_model_manager()
+            return
+
         if key == "hotkey_changed":
             self.hotkeys.update_hotkey(value)
             config.set('recognition', 'hotkey', value)
@@ -135,6 +139,20 @@ class Application:
             dictation_model = config.get('recognition', 'model', default=MODEL_TURBO)
             new_model = MODEL_TRANSLATE if new_value else dictation_model
             self.model_manager.load_model(new_model)
+
+    def _open_model_manager(self):
+        """Открыть диалог управления моделями."""
+        from ui.model_dialog import ModelManagerDialog
+        dialog = ModelManagerDialog(config, parent=self.widget)
+        dialog.exec()
+        selected = dialog.model_selected
+        if selected:
+            translate_mode = config.get('dictation', 'translate_to_english', default=False)
+            if not translate_mode:
+                self.model_manager.load_model(selected)
+            self.widget.dictation_model = selected
+            self.widget.update()
+            self.tray._sync_quality_from_config()
 
     def _shutdown(self):
         """Корректное завершение."""

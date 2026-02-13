@@ -74,6 +74,9 @@ class TrayManager:
         translate_action = tray_menu.addAction("✓ Перевод → EN" if self.translate_mode else "Перевод → EN")
         translate_action.triggered.connect(lambda: self._bus.mode_changed.emit("translate_toggle", None))
 
+        models_action = tray_menu.addAction("Управление моделями...")
+        models_action.triggered.connect(lambda: self._bus.mode_changed.emit("open_model_manager", None))
+
         tray_menu.addSeparator()
 
         show_action = tray_menu.addAction("Показать")

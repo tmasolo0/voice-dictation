@@ -277,6 +277,9 @@ class DictationWidget(QWidget):
         translate_action = menu.addAction("✓ Перевод → EN" if self.translate_mode else "Перевод → EN")
         translate_action.triggered.connect(lambda: self._bus.mode_changed.emit("translate_toggle", None))
 
+        models_action = menu.addAction("Управление моделями...")
+        models_action.triggered.connect(lambda: self._bus.mode_changed.emit("open_model_manager", None))
+
         menu.addSeparator()
 
         minimize_action = menu.addAction("Свернуть в трей")
