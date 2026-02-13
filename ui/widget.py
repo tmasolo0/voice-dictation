@@ -271,15 +271,11 @@ class DictationWidget(QWidget):
         """Контекстное меню — сигналы вместо прямых вызовов."""
         menu = QMenu(self)
 
-        model_label = self._MODEL_LABELS.get(self.dictation_model, self.dictation_model)
-        quality_action = menu.addAction(f"Модель: {model_label} ⟩")
-        quality_action.triggered.connect(lambda: self._bus.mode_changed.emit("quality_toggle", None))
+        models_action = menu.addAction("Управление моделями...")
+        models_action.triggered.connect(lambda: self._bus.mode_changed.emit("open_model_manager", None))
 
         translate_action = menu.addAction("✓ Перевод → EN" if self.translate_mode else "Перевод → EN")
         translate_action.triggered.connect(lambda: self._bus.mode_changed.emit("translate_toggle", None))
-
-        models_action = menu.addAction("Управление моделями...")
-        models_action.triggered.connect(lambda: self._bus.mode_changed.emit("open_model_manager", None))
 
         menu.addSeparator()
 
