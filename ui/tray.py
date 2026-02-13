@@ -57,12 +57,18 @@ class TrayManager:
 
         return QIcon(pixmap)
 
+    _MODEL_LABELS = {
+        'large-v3-turbo': 'Turbo',
+        'large-v3': 'Quality',
+        'whisper-podlodka-turbo': 'RU Turbo',
+    }
+
     def _rebuild_menu(self):
         """Пересоздание контекстного меню трея."""
         tray_menu = QMenu()
 
-        is_max = self.dictation_model == 'large-v3'
-        quality_action = tray_menu.addAction("✓ Макс качество" if is_max else "Макс качество")
+        model_label = self._MODEL_LABELS.get(self.dictation_model, self.dictation_model)
+        quality_action = tray_menu.addAction(f"Модель: {model_label} ⟩")
         quality_action.triggered.connect(lambda: self._bus.mode_changed.emit("quality_toggle", None))
 
         translate_action = tray_menu.addAction("✓ Перевод → EN" if self.translate_mode else "Перевод → EN")
@@ -95,15 +101,19 @@ class TrayManager:
             mode_text = f"EN (перевод, {model_name})" if self.translate_mode else f"RU/EN ({self.dictation_model})"
             self._tray_icon.showMessage("Dictation", f"Режим: {mode_text}",
                                         QSystemTrayIcon.MessageIcon.Information, 2000)
+            self._rebuild_menu()
+            self._tray_icon.setIcon(self._create_tray_icon("ready"))
 
         elif key == "quality_toggle":
-            if self.dictation_model == 'large-v3':
-                self.dictation_model = 'large-v3-turbo'
-            else:
-                self.dictation_model = 'large-v3'
-            mode_text = "Макс (large-v3)" if self.dictation_model == 'large-v3' else "Turbo (large-v3-turbo)"
-            self._tray_icon.showMessage("Dictation", f"Качество: {mode_text}",
-                                        QSystemTrayIcon.MessageIcon.Information, 2000)
+            # Defer — app обновит config, потом мы прочитаем
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, self._sync_quality_from_config)
 
+    def _sync_quality_from_config(self):
+        """Синхронизировать модель из конфига после обновления."""
+        self.dictation_model = self._config.get('recognition', 'model', default='large-v3-turbo')
+        model_label = self._MODEL_LABELS.get(self.dictation_model, self.dictation_model)
+        self._tray_icon.showMessage("Dictation", f"Модель: {model_label}",
+                                    QSystemTrayIcon.MessageIcon.Information, 2000)
         self._rebuild_menu()
         self._tray_icon.setIcon(self._create_tray_icon("ready"))

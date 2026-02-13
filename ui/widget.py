@@ -173,11 +173,14 @@ class DictationWidget(QWidget):
         """Обновление режимов для отображения."""
         if key == "translate_toggle":
             self.translate_mode = not self.translate_mode
+            self.update()
         elif key == "quality_toggle":
-            if self.dictation_model == 'large-v3':
-                self.dictation_model = 'large-v3-turbo'
-            else:
-                self.dictation_model = 'large-v3'
+            # Defer read — app обновит config раньше, чем сработает singleShot
+            QTimer.singleShot(0, self._sync_model_from_config)
+
+    def _sync_model_from_config(self):
+        """Синхронизировать модель из конфига (после обновления app)."""
+        self.dictation_model = self._config.get('recognition', 'model', default='large-v3-turbo')
         self.update()
 
     def _minimize_to_tray(self):
@@ -257,12 +260,18 @@ class DictationWidget(QWidget):
             self._save_position()
             event.accept()
 
+    _MODEL_LABELS = {
+        'large-v3-turbo': 'Turbo',
+        'large-v3': 'Quality',
+        'whisper-podlodka-turbo': 'RU Turbo',
+    }
+
     def contextMenuEvent(self, event):
         """Контекстное меню — сигналы вместо прямых вызовов."""
         menu = QMenu(self)
 
-        is_max = self.dictation_model == 'large-v3'
-        quality_action = menu.addAction("✓ Макс качество" if is_max else "Макс качество")
+        model_label = self._MODEL_LABELS.get(self.dictation_model, self.dictation_model)
+        quality_action = menu.addAction(f"Модель: {model_label} ⟩")
         quality_action.triggered.connect(lambda: self._bus.mode_changed.emit("quality_toggle", None))
 
         translate_action = menu.addAction("✓ Перевод → EN" if self.translate_mode else "Перевод → EN")

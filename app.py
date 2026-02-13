@@ -17,7 +17,11 @@ from ui.tray import TrayManager
 
 MODEL_TURBO = 'large-v3-turbo'
 MODEL_QUALITY = 'large-v3'
+MODEL_RUSSIAN = 'whisper-podlodka-turbo'
 MODEL_TRANSLATE = 'medium'
+
+# Цикл переключения качества: turbo → quality → russian → turbo
+MODEL_CYCLE = [MODEL_TURBO, MODEL_QUALITY, MODEL_RUSSIAN]
 
 
 class Application:
@@ -72,14 +76,16 @@ class Application:
 
         # Startup info
         hotkey = config.get('recognition', 'hotkey', default='f9')
+        translate_hotkey = config.get('recognition', 'translate_hotkey', default='f10')
         dictation_model = config.get('recognition', 'model', default=MODEL_TURBO)
         print("=" * 40)
         print("Voice Dictation")
         print("=" * 40)
-        print(f"Горячая клавиша: {hotkey.upper()}")
+        print(f"Запись: {hotkey.upper()}")
+        print(f"Перевод: {translate_hotkey.upper()}")
         print(f"Модель: {dictation_model}")
         print(f"Режим: {'EN (перевод)' if translate_mode else 'RU/EN (авто)'}")
-        print("ПКМ → качество / перевод")
+        print("ПКМ → модель / перевод")
         print("=" * 40)
 
     def _on_text_recognized(self, text, metadata):
@@ -93,9 +99,25 @@ class Application:
 
     def _on_mode_changed(self, key, value):
         """Централизованная обработка переключения режимов."""
+        if key == "hotkey_changed":
+            self.hotkeys.update_hotkey(value)
+            config.set('recognition', 'hotkey', value)
+            config.save()
+            return
+
+        if key == "translate_hotkey_changed":
+            self.hotkeys.update_translate_hotkey(value)
+            config.set('recognition', 'translate_hotkey', value)
+            config.save()
+            return
+
         if key == "quality_toggle":
             current = config.get('recognition', 'model', default=MODEL_TURBO)
-            new_model = MODEL_TURBO if current == MODEL_QUALITY else MODEL_QUALITY
+            try:
+                idx = MODEL_CYCLE.index(current)
+            except ValueError:
+                idx = 0
+            new_model = MODEL_CYCLE[(idx + 1) % len(MODEL_CYCLE)]
             config.set('recognition', 'model', new_model)
             config.save()
 
