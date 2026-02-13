@@ -103,6 +103,17 @@ class Application:
             self._open_model_manager()
             return
 
+        if key == "select_model":
+            # Загрузка модели из диалога (пока диалог открыт)
+            print(f"Переключение модели → {value}")
+            translate_mode = config.get('dictation', 'translate_to_english', default=False)
+            if not translate_mode:
+                self.model_manager.load_model(value)
+            self.widget.dictation_model = value
+            self.widget.update()
+            self.tray._sync_quality_from_config()
+            return
+
         if key == "hotkey_changed":
             self.hotkeys.update_hotkey(value)
             config.set('recognition', 'hotkey', value)
@@ -143,17 +154,8 @@ class Application:
     def _open_model_manager(self):
         """Открыть диалог управления моделями."""
         from ui.model_dialog import ModelManagerDialog
-        dialog = ModelManagerDialog(config, parent=self.widget)
+        dialog = ModelManagerDialog(config, event_bus=self.bus, parent=self.widget)
         dialog.exec()
-        selected = dialog.model_selected
-        if selected:
-            print(f"Переключение модели → {selected}")
-            translate_mode = config.get('dictation', 'translate_to_english', default=False)
-            if not translate_mode:
-                self.model_manager.load_model(selected)
-            self.widget.dictation_model = selected
-            self.widget.update()
-            self.tray._sync_quality_from_config()
 
     def _shutdown(self):
         """Корректное завершение."""

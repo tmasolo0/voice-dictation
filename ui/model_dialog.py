@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QHeaderView,
+    QLabel,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -59,9 +60,10 @@ class ModelDownloadThread(QThread):
 class ModelManagerDialog(QDialog):
     """Диалог управления моделями — список, скачивание, выбор активной."""
 
-    def __init__(self, config, parent=None):
+    def __init__(self, config, event_bus=None, parent=None):
         super().__init__(parent)
         self._config = config
+        self._bus = event_bus
         self._download_thread = None
         self._model_selected = None
 
@@ -87,10 +89,20 @@ class ModelManagerDialog(QDialog):
         self._progress_bar.hide()
         layout.addWidget(self._progress_bar)
 
+        # Статус-строка
+        self._status_label = QLabel("")
+        layout.addWidget(self._status_label)
+
         # Кнопка закрыть
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+        # Подписка на сигналы загрузки модели
+        if self._bus:
+            self._bus.model_load_started.connect(self._on_model_load_started)
+            self._bus.model_load_finished.connect(self._on_model_load_finished)
+            self._bus.model_load_failed.connect(self._on_model_load_failed)
 
         self._populate_table()
 
@@ -148,11 +160,28 @@ class ModelManagerDialog(QDialog):
         self._table.resizeRowsToContents()
 
     def _on_select_model(self, model_name: str):
-        """Выбрать модель как активную."""
+        """Выбрать модель как активную и запустить загрузку."""
         self._config.set('recognition', 'model', model_name)
         self._config.save()
         self._model_selected = model_name
+        self._status_label.setText(f"Переключение на {model_name}...")
         self._populate_table()
+        # Триггер загрузки модели через EventBus
+        if self._bus:
+            self._bus.mode_changed.emit("select_model", model_name)
+
+    def _on_model_load_started(self, model_name: str):
+        """Модель начала загружаться."""
+        self._status_label.setText(f"Выгрузка старой модели, загрузка {model_name}...")
+
+    def _on_model_load_finished(self, model_name: str):
+        """Модель загружена."""
+        self._status_label.setText(f"Модель {model_name} загружена ✓")
+        self._populate_table()
+
+    def _on_model_load_failed(self, error: str):
+        """Ошибка загрузки модели."""
+        self._status_label.setText(f"Ошибка: {error}")
 
     def _on_download_model(self, model_name: str):
         """Запустить скачивание модели."""
