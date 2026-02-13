@@ -39,9 +39,10 @@ from core.config_manager import config
 HOTKEY = config.get('recognition', 'hotkey', default='f9')
 SAMPLE_RATE = 16000
 
-# Модели: turbo для диктовки, medium для перевода (translate в turbo сломан)
-MODEL_DICTATION = config.get('recognition', 'model', default='large-v3-turbo')
-MODEL_TRANSLATE = 'medium'  # medium поддерживает task="translate"
+# Модели Whisper
+MODEL_TURBO = 'large-v3-turbo'    # Быстрая дистиллированная модель
+MODEL_QUALITY = 'large-v3'        # Полная модель, лучшее качество
+MODEL_TRANSLATE = 'medium'        # medium поддерживает task="translate"
 MODELS_DIR = Path(__file__).parent / "models"
 
 DEVICE = config.get('recognition', 'device', default='cuda')
@@ -104,8 +105,13 @@ class DictationWidget(QWidget):
         self.audio_data = []
         self.model = None
         self.current_model_name = None  # Какая модель сейчас загружена
+        self.model_loading = False      # Флаг загрузки модели (блокирует запись)
         self.stream = None
         self.focused_window = None
+
+        # Модель для диктовки (turbo или quality)
+        saved_model = config.get('recognition', 'model', default='large-v3-turbo')
+        self.dictation_model = saved_model
 
         # Режим перевода на английский
         self.translate_mode = config.get('dictation', 'translate_to_english', default=False)
@@ -149,13 +155,21 @@ class DictationWidget(QWidget):
         self.setWindowTitle("Dictation")
 
     def _setup_tray(self):
-        """Настройка системного трея."""
-        self.tray_icon = QSystemTrayIcon(self)
-        self.tray_icon.setIcon(self._create_tray_icon("ready"))
-        self.tray_icon.setToolTip("Voice Dictation")
-        self.tray_icon.activated.connect(self._on_tray_activated)
+        """Настройка системного трея (создание или обновление меню)."""
+        if self.tray_icon is None:
+            self.tray_icon = QSystemTrayIcon(self)
+            self.tray_icon.setIcon(self._create_tray_icon("ready"))
+            self.tray_icon.setToolTip("Voice Dictation")
+            self.tray_icon.activated.connect(self._on_tray_activated)
 
         tray_menu = QMenu()
+
+        # Качество модели
+        is_max = self.dictation_model == MODEL_QUALITY
+        quality_action = tray_menu.addAction(
+            "✓ Макс качество" if is_max else "Макс качество"
+        )
+        quality_action.triggered.connect(self._toggle_quality_mode)
 
         # Режим перевода
         translate_action = tray_menu.addAction(
@@ -179,17 +193,10 @@ class DictationWidget(QWidget):
         self.translate_mode = not self.translate_mode
         config.set('dictation', 'translate_to_english', self.translate_mode)
 
-        # Swap модели: turbo ↔ medium
-        new_model = MODEL_TRANSLATE if self.translate_mode else MODEL_DICTATION
-        if self.current_model_name != new_model:
-            self.signals.state_changed.emit("processing")  # Показываем что грузим
-            self._load_model(new_model)
-            self.signals.state_changed.emit("ready")
-
         # Обновляем меню трея
         self._setup_tray()
 
-        mode_text = f"EN (перевод, {MODEL_TRANSLATE})" if self.translate_mode else f"RU/EN ({MODEL_DICTATION})"
+        mode_text = f"EN (перевод, {MODEL_TRANSLATE})" if self.translate_mode else f"RU/EN ({self.dictation_model})"
         print(f"Режим: {mode_text}")
         self.tray_icon.showMessage(
             "Dictation",
@@ -197,6 +204,55 @@ class DictationWidget(QWidget):
             QSystemTrayIcon.MessageIcon.Information,
             2000
         )
+
+        # Swap модели: dictation ↔ medium
+        new_model = MODEL_TRANSLATE if self.translate_mode else self.dictation_model
+        self._switch_model(new_model)
+
+    def _toggle_quality_mode(self):
+        """Переключение качества распознавания (turbo ↔ large-v3)."""
+        if self.dictation_model == MODEL_QUALITY:
+            self.dictation_model = MODEL_TURBO
+        else:
+            self.dictation_model = MODEL_QUALITY
+
+        config.set('recognition', 'model', self.dictation_model)
+        config.save()
+
+        # Обновляем меню
+        self._setup_tray()
+
+        mode_text = "Макс (large-v3)" if self.dictation_model == MODEL_QUALITY else "Turbo (large-v3-turbo)"
+        print(f"Качество: {mode_text}")
+        self.tray_icon.showMessage(
+            "Dictation",
+            f"Качество: {mode_text}",
+            QSystemTrayIcon.MessageIcon.Information,
+            2000
+        )
+
+        # Меняем модель, если не в режиме перевода
+        if not self.translate_mode:
+            self._switch_model(self.dictation_model)
+
+    def _switch_model(self, model_name: str):
+        """Фоновая загрузка модели без блокировки UI."""
+        if self.current_model_name == model_name:
+            return
+
+        self.model_loading = True
+        self.signals.state_changed.emit("processing")
+
+        def do_load():
+            try:
+                self._load_model(model_name)
+            except Exception as e:
+                print(f"Ошибка загрузки модели: {e}")
+            finally:
+                self.model_loading = False
+                self.signals.state_changed.emit("ready")
+
+        threading.Thread(target=do_load, daemon=True).start()
 
     def _create_tray_icon(self, state: str) -> QIcon:
         """Создание иконки для трея."""
@@ -270,7 +326,7 @@ class DictationWidget(QWidget):
     def _init_model(self):
         """Инициализация модели Whisper."""
         # Выбираем модель в зависимости от режима
-        model_name = MODEL_TRANSLATE if self.translate_mode else MODEL_DICTATION
+        model_name = MODEL_TRANSLATE if self.translate_mode else self.dictation_model
         self._load_model(model_name)
 
     def _load_model(self, model_name: str):
@@ -376,6 +432,9 @@ class DictationWidget(QWidget):
         """Обработка событий клавиатуры."""
         if event.name != HOTKEY:
             return
+
+        if self.model_loading:
+            return  # Модель ещё грузится
 
         if event.event_type == 'down' and not self.recording:
             # Начало записи
@@ -540,6 +599,13 @@ class DictationWidget(QWidget):
         """Контекстное меню."""
         menu = QMenu(self)
 
+        # Качество модели
+        is_max = self.dictation_model == MODEL_QUALITY
+        quality_action = menu.addAction(
+            "✓ Макс качество" if is_max else "Макс качество"
+        )
+        quality_action.triggered.connect(self._toggle_quality_mode)
+
         # Режим перевода
         translate_action = menu.addAction(
             "✓ Перевод → EN" if self.translate_mode else "Перевод → EN"
@@ -604,8 +670,9 @@ def main():
     print("Voice Dictation")
     print("=" * 40)
     print(f"Горячая клавиша: {HOTKEY.upper()}")
+    print(f"Модель: {widget.dictation_model}")
     print(f"Режим: {'EN (перевод)' if widget.translate_mode else 'RU/EN (авто)'}")
-    print("ПКМ → переключение режима")
+    print("ПКМ → качество / перевод")
     print("=" * 40)
 
     sys.exit(app.exec())

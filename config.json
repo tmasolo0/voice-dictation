@@ -29,21 +29,9 @@
     "autostart": false,
     "start_minimized": false
   },
-  "openai": {
-    "model": "gpt-3.5-turbo",
-    "max_tokens": 300
-  },
   "vad": {
     "threshold": 0.5,
     "min_speech_ms": 250,
     "min_silence_ms": 500
-  },
-  "tts": {
-    "engine": "xtts",
-    "device": "cuda",
-    "reference_audio": "voices/samples/ru_svetlana_short.wav",
-    "language": "ru",
-    "speed": 1.15,
-    "temperature": 0.65
   }
 }
