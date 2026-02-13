@@ -40,24 +40,18 @@ class ModelManager:
         threading.Thread(target=self._do_load, args=(model_name,), daemon=True).start()
 
     def _do_load(self, model_name: str):
-        """Фоновая загрузка: создать новую, подменить под блокировкой, удалить старую."""
+        """Фоновая загрузка: выгрузить старую, загрузить новую (safe swap для VRAM)."""
         try:
             print(f"Загрузка модели {model_name}...")
 
             device = self._config.get('recognition', 'device', default='cuda')
             compute_type = self._config.get('recognition', 'compute_type', default='float16')
 
-            local_path = MODELS_DIR / model_name
-            model_path = str(local_path) if local_path.exists() else model_name
-
-            new_model = WhisperModel(model_path, device=device, compute_type=compute_type)
-
+            # Выгрузить старую модель ДО загрузки новой (предотвращает OOM)
             with self._lock:
                 old_model = self._model
-                self._model = new_model
-                self._model_name = model_name
+                self._model = None
 
-            # Удаляем старую модель ВНЕ блокировки
             if old_model is not None:
                 del old_model
                 gc.collect()
@@ -67,6 +61,16 @@ class ModelManager:
                         torch.cuda.empty_cache()
                 except ImportError:
                     pass
+                print("Старая модель выгружена из VRAM")
+
+            local_path = MODELS_DIR / model_name
+            model_path = str(local_path) if local_path.exists() else model_name
+
+            new_model = WhisperModel(model_path, device=device, compute_type=compute_type)
+
+            with self._lock:
+                self._model = new_model
+                self._model_name = model_name
 
             print(f"Модель {model_name} загружена ({device})")
             self._bus.model_load_finished.emit(model_name)
