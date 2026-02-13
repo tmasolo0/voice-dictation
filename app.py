@@ -16,12 +16,7 @@ from ui.tray import TrayManager
 
 
 MODEL_TURBO = 'large-v3-turbo'
-MODEL_QUALITY = 'large-v3'
-MODEL_RUSSIAN = 'whisper-podlodka-turbo'
 MODEL_TRANSLATE = 'medium'
-
-# Цикл переключения качества: turbo → quality → russian → turbo
-MODEL_CYCLE = [MODEL_TURBO, MODEL_QUALITY, MODEL_RUSSIAN]
 
 
 class Application:
@@ -103,17 +98,6 @@ class Application:
             self._open_model_manager()
             return
 
-        if key == "select_model":
-            # Загрузка модели из диалога (пока диалог открыт)
-            print(f"Переключение модели → {value}")
-            translate_mode = config.get('dictation', 'translate_to_english', default=False)
-            if not translate_mode:
-                self.model_manager.load_model(value)
-            self.widget.dictation_model = value
-            self.widget.update()
-            self.tray._sync_quality_from_config()
-            return
-
         if key == "hotkey_changed":
             self.hotkeys.update_hotkey(value)
             config.set('recognition', 'hotkey', value)
@@ -126,22 +110,7 @@ class Application:
             config.save()
             return
 
-        if key == "quality_toggle":
-            current = config.get('recognition', 'model', default=MODEL_TURBO)
-            try:
-                idx = MODEL_CYCLE.index(current)
-            except ValueError:
-                idx = 0
-            new_model = MODEL_CYCLE[(idx + 1) % len(MODEL_CYCLE)]
-            config.set('recognition', 'model', new_model)
-            config.save()
-
-            # Переключаем модель, если не в режиме перевода
-            translate_mode = config.get('dictation', 'translate_to_english', default=False)
-            if not translate_mode:
-                self.model_manager.load_model(new_model)
-
-        elif key == "translate_toggle":
+        if key == "translate_toggle":
             current = config.get('dictation', 'translate_to_english', default=False)
             new_value = not current
             config.set('dictation', 'translate_to_english', new_value)

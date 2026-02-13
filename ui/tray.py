@@ -104,17 +104,3 @@ class TrayManager:
             self._rebuild_menu()
             self._tray_icon.setIcon(self._create_tray_icon("ready"))
 
-        elif key == "quality_toggle":
-            # Defer — app обновит config, потом мы прочитаем
-            from PyQt6.QtCore import QTimer
-            QTimer.singleShot(0, self._sync_quality_from_config)
-
-    def _sync_quality_from_config(self):
-        """Синхронизировать модель из конфига после обновления."""
-        self.dictation_model = self._config.get('recognition', 'model', default='large-v3-turbo')
-        model_label = self._MODEL_LABELS.get(self.dictation_model, self.dictation_model)
-        self._tray_icon.setToolTip(f"Voice Dictation — {model_label}")
-        self._tray_icon.showMessage("Dictation", f"Модель: {model_label}",
-                                    QSystemTrayIcon.MessageIcon.Information, 2000)
-        self._rebuild_menu()
-        self._tray_icon.setIcon(self._create_tray_icon("ready"))

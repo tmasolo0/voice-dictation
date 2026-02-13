@@ -174,14 +174,6 @@ class DictationWidget(QWidget):
         if key == "translate_toggle":
             self.translate_mode = not self.translate_mode
             self.update()
-        elif key == "quality_toggle":
-            # Defer read — app обновит config раньше, чем сработает singleShot
-            QTimer.singleShot(0, self._sync_model_from_config)
-
-    def _sync_model_from_config(self):
-        """Синхронизировать модель из конфига (после обновления app)."""
-        self.dictation_model = self._config.get('recognition', 'model', default='large-v3-turbo')
-        self.update()
 
     def _minimize_to_tray(self):
         """Свернуть в трей."""
@@ -229,14 +221,23 @@ class DictationWidget(QWidget):
         painter.drawEllipse(center - radius, center - radius,
                            radius * 2, radius * 2)
 
-        # Иконка режима перевода (EN)
-        if self.translate_mode and self._current_state == "ready":
+        # Текст на виджете
+        if self._current_state == "ready":
             painter.setPen(QPen(QColor(255, 255, 255), 2))
             font = painter.font()
-            font.setPointSize(int(size * 0.15))
             font.setBold(True)
-            painter.setFont(font)
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "EN")
+
+            if self.translate_mode:
+                # Режим перевода — крупная надпись EN
+                font.setPointSize(int(size * 0.15))
+                painter.setFont(font)
+                painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "EN")
+            else:
+                # Обычный режим — метка модели
+                label = self._MODEL_LABELS.get(self.dictation_model, self.dictation_model)
+                font.setPointSize(int(size * 0.11))
+                painter.setFont(font)
+                painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, label)
 
         painter.end()
 
