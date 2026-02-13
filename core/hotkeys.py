@@ -47,8 +47,14 @@ class HotkeyManager:
             self._bus.mode_changed.emit("translate_toggle", None)
             return
 
-        # Push-to-talk — только когда enabled
+        # Push-to-talk
         if event.name != self._hotkey:
+            return
+
+        # Отпускание ВСЕГДА останавливает запись (даже если enabled=False из-за смены состояния)
+        if event.event_type == 'up' and self._recording:
+            self._recording = False
+            self._bus.recording_stop.emit()
             return
 
         if not self._enabled:
@@ -59,7 +65,3 @@ class HotkeyManager:
             hwnd = win32gui.GetForegroundWindow()
             self._bus.recording_start.emit(hwnd)
             print("Запись...")
-
-        elif event.event_type == 'up' and self._recording:
-            self._recording = False
-            self._bus.recording_stop.emit()
