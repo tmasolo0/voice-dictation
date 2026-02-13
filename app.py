@@ -147,6 +147,7 @@ class Application:
         dialog.exec()
         selected = dialog.model_selected
         if selected:
+            print(f"Переключение модели → {selected}")
             translate_mode = config.get('dictation', 'translate_to_english', default=False)
             if not translate_mode:
                 self.model_manager.load_model(selected)

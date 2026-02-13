@@ -263,6 +263,7 @@ class DictationWidget(QWidget):
     _MODEL_LABELS = {
         'large-v3-turbo': 'Turbo',
         'large-v3': 'Quality',
+        'medium': 'Medium',
         'whisper-podlodka-turbo': 'RU Turbo',
     }
 

@@ -60,6 +60,7 @@ class TrayManager:
     _MODEL_LABELS = {
         'large-v3-turbo': 'Turbo',
         'large-v3': 'Quality',
+        'medium': 'Medium',
         'whisper-podlodka-turbo': 'RU Turbo',
     }
 
@@ -116,6 +117,7 @@ class TrayManager:
         """Синхронизировать модель из конфига после обновления."""
         self.dictation_model = self._config.get('recognition', 'model', default='large-v3-turbo')
         model_label = self._MODEL_LABELS.get(self.dictation_model, self.dictation_model)
+        self._tray_icon.setToolTip(f"Voice Dictation — {model_label}")
         self._tray_icon.showMessage("Dictation", f"Модель: {model_label}",
                                     QSystemTrayIcon.MessageIcon.Information, 2000)
         self._rebuild_menu()
