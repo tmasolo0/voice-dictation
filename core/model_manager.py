@@ -64,26 +64,28 @@ class ModelManager:
                 self._model = None
 
             if old_model is not None:
-                print(f"[2] del old_model (refs: {sys.getrefcount(old_model) - 1})...")
+                print("[2] unload_model() — выгрузка весов из GPU...")
+                sys.stdout.flush()
+                try:
+                    old_model.model.unload_model()
+                except Exception as e:
+                    print(f"[2] unload_model warning: {e}")
+                print("[3] Dropping reference + gc...")
                 sys.stdout.flush()
                 del old_model
-                print("[3] gc.collect()...")
-                sys.stdout.flush()
                 gc.collect()
                 gc.collect()
                 try:
                     import torch
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
-                        print("[4] torch.cuda.empty_cache() done")
                 except ImportError:
-                    print("[4] torch not available, skip")
-                sys.stdout.flush()
-                time.sleep(1)
-                print("[5] Старая модель выгружена из VRAM")
+                    pass
+                time.sleep(0.5)
+                print("[4] Старая модель выгружена из VRAM")
                 sys.stdout.flush()
             else:
-                print("[2-5] Старая модель отсутствует, пропуск очистки")
+                print("[2-4] Старая модель отсутствует, пропуск очистки")
                 sys.stdout.flush()
 
             local_path = MODELS_DIR / model_name
