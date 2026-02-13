@@ -1,6 +1,7 @@
 """ModelManager — управление моделью Whisper."""
 
 import gc
+import time
 import threading
 from pathlib import Path
 from faster_whisper import WhisperModel
@@ -60,12 +61,15 @@ class ModelManager:
             if old_model is not None:
                 del old_model
                 gc.collect()
+                gc.collect()  # Второй проход для weak-refs и C++ деструкторов
                 try:
                     import torch
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
                 except ImportError:
                     pass
+                # Пауза: CTranslate2 освобождает CUDA memory асинхронно
+                time.sleep(1)
                 print("Старая модель выгружена из VRAM")
 
             local_path = MODELS_DIR / model_name
