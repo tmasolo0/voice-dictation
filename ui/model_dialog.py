@@ -66,6 +66,7 @@ class ModelManagerDialog(QDialog):
         self._bus = event_bus
         self._download_thread = None
         self._model_selected = None
+        self._model_loading = False
 
         self.setWindowTitle("Управление моделями")
         self.setMinimumSize(550, 400)
@@ -148,6 +149,7 @@ class ModelManagerDialog(QDialog):
                 btn.setEnabled(False)
             elif downloaded:
                 btn.setText("Выбрать")
+                btn.setEnabled(not self._model_loading)
                 btn.clicked.connect(lambda checked, n=name: self._on_select_model(n))
             elif info['downloadable']:
                 btn.setText("Скачать")
@@ -161,9 +163,12 @@ class ModelManagerDialog(QDialog):
 
     def _on_select_model(self, model_name: str):
         """Выбрать модель как активную и запустить загрузку."""
+        if self._model_loading:
+            return
         self._config.set('recognition', 'model', model_name)
         self._config.save()
         self._model_selected = model_name
+        self._model_loading = True
         self._status_label.setText(f"Переключение на {model_name}...")
         self._populate_table()
         # Триггер загрузки модели через EventBus
@@ -176,12 +181,15 @@ class ModelManagerDialog(QDialog):
 
     def _on_model_load_finished(self, model_name: str):
         """Модель загружена."""
+        self._model_loading = False
         self._status_label.setText(f"Модель {model_name} загружена ✓")
         self._populate_table()
 
     def _on_model_load_failed(self, error: str):
         """Ошибка загрузки модели."""
+        self._model_loading = False
         self._status_label.setText(f"Ошибка: {error}")
+        self._populate_table()
 
     def _on_download_model(self, model_name: str):
         """Запустить скачивание модели."""

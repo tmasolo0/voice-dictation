@@ -18,6 +18,7 @@ class ModelManager:
         self._model = None
         self._model_name = None
         self._lock = threading.Lock()
+        self._loading = False
 
     @property
     def model_name(self) -> str | None:
@@ -36,6 +37,10 @@ class ModelManager:
         """Загрузить модель в фоновом потоке."""
         if self._model_name == model_name and self._model is not None:
             return
+        if self._loading:
+            print(f"Загрузка уже идёт, пропуск запроса на {model_name}")
+            return
+        self._loading = True
         self._bus.model_load_started.emit(model_name)
         threading.Thread(target=self._do_load, args=(model_name,), daemon=True).start()
 
@@ -73,8 +78,10 @@ class ModelManager:
                 self._model_name = model_name
 
             print(f"Модель {model_name} загружена ({device})")
+            self._loading = False
             self._bus.model_load_finished.emit(model_name)
 
         except Exception as e:
             print(f"Ошибка загрузки модели: {e}")
+            self._loading = False
             self._bus.model_load_failed.emit(str(e))
