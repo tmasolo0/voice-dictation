@@ -41,12 +41,14 @@ class Recognizer:
             start = time.time()
             translate_mode = self._config.get('dictation', 'translate_to_english', default=False)
             beam_size = self._config.get('recognition', 'beam_size', default=5)
+            hotwords = self._config.get_hotwords()
 
             if translate_mode:
                 segments, info = model.transcribe(
                     audio_data,
                     task="translate",
                     vad_filter=True,
+                    hotwords=hotwords or None,
                     condition_on_previous_text=self._config.get('recognition', 'condition_on_previous_text', default=False),
                     beam_size=beam_size,
                     repetition_penalty=self._config.get('recognition', 'repetition_penalty', default=1.2),
@@ -58,7 +60,7 @@ class Recognizer:
                 segments, info = model.transcribe(
                     audio_data,
                     vad_filter=True,
-                    initial_prompt=self._config.get_initial_prompt(),
+                    hotwords=hotwords or None,
                     condition_on_previous_text=self._config.get('recognition', 'condition_on_previous_text', default=False),
                     beam_size=beam_size,
                     temperature=self._config.get('recognition', 'temperature', default=0.3),

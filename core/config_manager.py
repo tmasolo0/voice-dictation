@@ -154,6 +154,18 @@ class ConfigManager:
             print(f"Ошибка чтения словаря: {e}")
             return ""
 
+    def get_hotwords(self) -> str:
+        """Собирает термины из dictionary.txt в строку для hotwords API."""
+        if not DICTIONARY_FILE.exists():
+            return ""
+        try:
+            text = DICTIONARY_FILE.read_text(encoding='utf-8')
+            terms = [line.strip() for line in text.splitlines() if line.strip()]
+            return " ".join(terms)
+        except IOError as e:
+            print(f"Ошибка чтения словаря: {e}")
+            return ""
+
     def reload(self):
         """Перезагрузка конфигурации из файла."""
         self._load()
