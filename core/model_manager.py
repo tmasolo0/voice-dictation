@@ -70,22 +70,14 @@ class ModelManager:
                     old_model.model.unload_model()
                 except Exception as e:
                     print(f"[2] unload_model warning: {e}")
-                print("[3] Dropping reference + gc...")
-                sys.stdout.flush()
-                del old_model
+                # НЕ вызываем del — CTranslate2 деструктор сегфолтит
+                # После unload_model() VRAM освобождена, Python-обёртка мизерная
+                old_model = None
                 gc.collect()
-                gc.collect()
-                try:
-                    import torch
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                except ImportError:
-                    pass
-                time.sleep(0.5)
-                print("[4] Старая модель выгружена из VRAM")
+                print("[3] VRAM освобождена (unload), объект отброшен")
                 sys.stdout.flush()
             else:
-                print("[2-4] Старая модель отсутствует, пропуск очистки")
+                print("[2-3] Старая модель отсутствует, пропуск")
                 sys.stdout.flush()
 
             local_path = MODELS_DIR / model_name
