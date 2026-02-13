@@ -16,6 +16,9 @@ python311/*
 models/*
 !models/.gitkeep
 
+# Planning docs (local only)
+.planning/
+
 # Error logs
 logs/
 
