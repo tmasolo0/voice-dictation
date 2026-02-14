@@ -88,16 +88,7 @@ class TestDictionary:
         # hotwords — пробел-разделённые
         assert "," not in hotwords
 
-    def test_get_initial_prompt(self):
-        _dict_file.write_text("term1\nterm2\n", encoding='utf-8')
-        cfg = _fresh_config()
-        prompt = cfg.get_initial_prompt()
-        assert "term1" in prompt
-        assert "term2" in prompt
-        assert ", " in prompt
-
     def test_empty_dictionary(self):
         _dict_file.unlink(missing_ok=True)
         cfg = _fresh_config()
         assert cfg.get_hotwords() == ""
-        assert cfg.get_initial_prompt() == ""

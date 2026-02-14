@@ -53,7 +53,6 @@ class TestTranscriptionCount:
     def test_count_increments(self, mock_bus, mock_config):
         mock_config.get.side_effect = lambda *args, default=None: default
         mock_config.get_hotwords.return_value = ""
-        mock_config.get_initial_prompt.return_value = ""
 
         model_mgr = MagicMock()
         mock_model = MagicMock()

@@ -35,6 +35,5 @@ def mock_config():
     """Mock ConfigManager."""
     cfg = MagicMock()
     cfg.get.return_value = None
-    cfg.get_initial_prompt.return_value = ""
     cfg.get_hotwords.return_value = ""
     return cfg
