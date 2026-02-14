@@ -11,6 +11,7 @@ from core.recognizer import Recognizer
 from core.output_pipeline import OutputPipeline
 from core.text_inserter import TextInserter
 from core.hotkeys import HotkeyManager
+from core.history_manager import HistoryManager
 from ui.widget import DictationWidget
 from ui.tray import TrayManager
 
@@ -33,6 +34,7 @@ class Application:
         self.pipeline = OutputPipeline(self.bus)
         self.inserter = TextInserter(self.bus, config)
         self.hotkeys = HotkeyManager(self.bus, config)
+        self.history = HistoryManager(self.bus, self.model_manager)
 
         # UI
         self.widget = DictationWidget(self.bus, config)
@@ -132,4 +134,5 @@ class Application:
         self.recognizer.shutdown()
         self.audio.close_stream()
         self.hotkeys.stop()
+        self.history.close()
         QApplication.quit()
