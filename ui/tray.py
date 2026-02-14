@@ -57,13 +57,6 @@ class TrayManager:
 
         return QIcon(pixmap)
 
-    _MODEL_LABELS = {
-        'large-v3-turbo': 'Turbo',
-        'large-v3': 'Quality',
-        'medium': 'Medium',
-        'whisper-podlodka-turbo': 'RU Turbo',
-    }
-
     def _rebuild_menu(self):
         """Пересоздание контекстного меню трея."""
         tray_menu = QMenu()

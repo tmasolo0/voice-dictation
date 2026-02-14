@@ -9,6 +9,8 @@ from PyQt6.QtWidgets import QApplication, QWidget, QMenu
 from PyQt6.QtCore import Qt, QPoint, QTimer
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen
 
+from core.model_catalog import MODEL_LABELS
+
 
 # Цвета состояний
 COLORS = {
@@ -58,6 +60,7 @@ class DictationWidget(QWidget):
         self._current_state = "ready"
         self.translate_mode = config.get('dictation', 'translate_to_english', default=False)
         self.dictation_model = config.get('recognition', 'model', default='large-v3-turbo')
+        self._vram_mb = 0
 
         # Перетаскивание
         self._drag_position = QPoint()
@@ -76,6 +79,7 @@ class DictationWidget(QWidget):
         # Подписка на сигналы
         self._bus.state_changed.connect(self._on_state_changed)
         self._bus.mode_changed.connect(self._on_mode_changed)
+        self._bus.vram_updated.connect(self._on_vram_updated)
 
     def _setup_ui(self):
         """Настройка UI виджета."""
@@ -169,6 +173,11 @@ class DictationWidget(QWidget):
         self._animation_phase = 0.0
         self.update()
 
+    def _on_vram_updated(self, vram_mb: int):
+        """Обновление отображения VRAM."""
+        self._vram_mb = vram_mb
+        self.update()
+
     def _on_mode_changed(self, key: str, value):
         """Обновление режимов для отображения."""
         if key == "translate_toggle":
@@ -227,17 +236,48 @@ class DictationWidget(QWidget):
             font = painter.font()
             font.setBold(True)
 
+            has_vram = self._vram_mb > 0
+            vram_text = f"{self._vram_mb / 1024:.1f}G" if self._vram_mb >= 1024 else f"{self._vram_mb}M"
+
             if self.translate_mode:
-                # Режим перевода — крупная надпись EN
-                font.setPointSize(int(size * 0.15))
-                painter.setFont(font)
-                painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "EN")
+                if has_vram:
+                    # EN + VRAM — две строки
+                    font.setPointSize(int(size * 0.13))
+                    painter.setFont(font)
+                    upper = self.rect().adjusted(0, -int(size * 0.08), 0, 0)
+                    painter.drawText(upper, Qt.AlignmentFlag.AlignCenter, "EN")
+
+                    font.setBold(False)
+                    font.setPointSize(int(size * 0.07))
+                    painter.setFont(font)
+                    painter.setPen(QPen(QColor(255, 255, 255, 180), 1))
+                    lower = self.rect().adjusted(0, int(size * 0.15), 0, 0)
+                    painter.drawText(lower, Qt.AlignmentFlag.AlignCenter, vram_text)
+                else:
+                    # Только EN
+                    font.setPointSize(int(size * 0.15))
+                    painter.setFont(font)
+                    painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "EN")
             else:
-                # Обычный режим — метка модели
-                label = self._MODEL_LABELS.get(self.dictation_model, self.dictation_model)
-                font.setPointSize(int(size * 0.11))
-                painter.setFont(font)
-                painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, label)
+                label = MODEL_LABELS.get(self.dictation_model, self.dictation_model)
+                if has_vram:
+                    # Модель + VRAM — две строки
+                    font.setPointSize(int(size * 0.10))
+                    painter.setFont(font)
+                    upper = self.rect().adjusted(0, -int(size * 0.08), 0, 0)
+                    painter.drawText(upper, Qt.AlignmentFlag.AlignCenter, label)
+
+                    font.setBold(False)
+                    font.setPointSize(int(size * 0.07))
+                    painter.setFont(font)
+                    painter.setPen(QPen(QColor(255, 255, 255, 180), 1))
+                    lower = self.rect().adjusted(0, int(size * 0.15), 0, 0)
+                    painter.drawText(lower, Qt.AlignmentFlag.AlignCenter, vram_text)
+                else:
+                    # Только метка модели
+                    font.setPointSize(int(size * 0.11))
+                    painter.setFont(font)
+                    painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, label)
 
         painter.end()
 
@@ -260,13 +300,6 @@ class DictationWidget(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             self._save_position()
             event.accept()
-
-    _MODEL_LABELS = {
-        'large-v3-turbo': 'Turbo',
-        'large-v3': 'Quality',
-        'medium': 'Medium',
-        'whisper-podlodka-turbo': 'RU Turbo',
-    }
 
     def contextMenuEvent(self, event):
         """Контекстное меню — сигналы вместо прямых вызовов."""

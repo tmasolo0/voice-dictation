@@ -54,3 +54,11 @@ def get_local_models() -> list[str]:
         for d in MODELS_DIR.iterdir()
         if d.is_dir() and (d / "model.bin").exists()
     ]
+
+
+MODEL_LABELS = {
+    'large-v3-turbo': 'Turbo',
+    'large-v3': 'Quality',
+    'medium': 'Medium',
+    'whisper-podlodka-turbo': 'RU Turbo',
+}
