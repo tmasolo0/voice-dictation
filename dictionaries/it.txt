@@ -1,0 +1,52 @@
+# IT: фреймворки, паттерны, DevOps, инструменты
+# Термины, которых нет в базовом dictionary.txt
+
+# Паттерны и архитектура
+SOLID
+DRY
+KISS
+CQRS
+event sourcing
+dependency injection
+pub/sub
+load balancer
+reverse proxy
+service mesh
+
+# DevOps и инфраструктура
+Prometheus
+Grafana
+Nginx
+Apache
+Kafka
+RabbitMQ
+Celery
+Airflow
+Istio
+Helm
+
+# Базы данных и хранилища
+Cassandra
+ClickHouse
+InfluxDB
+Neo4j
+DynamoDB
+S3
+
+# Инструменты
+Postman
+Swagger
+OpenAPI
+Sentry
+Datadog
+SonarQube
+Jira
+Confluence
+
+# Протоколы и форматы
+AMQP
+MQTT
+Protocol Buffers
+protobuf
+MessagePack
+Avro

@@ -12,7 +12,8 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).parent.parent
 CONFIG_FILE = PROJECT_ROOT / "config.json"
 DICTIONARY_FILE = PROJECT_ROOT / "dictionary.txt"
-CONFIG_VERSION = 3
+DICTIONARIES_DIR = PROJECT_ROOT / "dictionaries"
+CONFIG_VERSION = 4
 
 DEFAULT_CONFIG = {
     "version": CONFIG_VERSION,
@@ -48,6 +49,9 @@ DEFAULT_CONFIG = {
         "threshold": 0.5,
         "min_speech_ms": 250,
         "min_silence_ms": 500
+    },
+    "dictionaries": {
+        "active": ["it"]
     },
     "system": {
         "autostart": False,
@@ -167,17 +171,38 @@ class ConfigManager:
         except IOError as e:
             print(f"Ошибка сохранения конфига: {e}")
 
-    def get_hotwords(self) -> str:
-        """Собирает термины из dictionary.txt в строку для hotwords API."""
-        if not DICTIONARY_FILE.exists():
-            return ""
+    def _load_dictionary_file(self, path: Path) -> set:
+        """Загрузка терминов из файла словаря."""
+        if not path.exists():
+            return set()
         try:
-            text = DICTIONARY_FILE.read_text(encoding='utf-8')
-            terms = [line.strip() for line in text.splitlines() if line.strip()]
-            return " ".join(terms)
+            text = path.read_text(encoding='utf-8')
+            return {
+                line.strip().lower()
+                for line in text.splitlines()
+                if line.strip() and not line.strip().startswith('#')
+            }
         except IOError as e:
-            print(f"Ошибка чтения словаря: {e}")
-            return ""
+            print(f"Ошибка чтения словаря {path}: {e}")
+            return set()
+
+    def get_hotwords(self) -> str:
+        """Собирает термины из base dictionary.txt + активных доменных словарей."""
+        terms = set()
+
+        # Базовый словарь
+        terms.update(self._load_dictionary_file(DICTIONARY_FILE))
+
+        # Доменные словари
+        active = self.get('dictionaries', 'active', default=[])
+        for domain in active:
+            domain_file = DICTIONARIES_DIR / f"{domain}.txt"
+            if domain_file.exists():
+                terms.update(self._load_dictionary_file(domain_file))
+            else:
+                print(f"Доменный словарь не найден: {domain_file}")
+
+        return " ".join(sorted(terms)) if terms else ""
 
     def reload(self):
         """Перезагрузка конфигурации из файла."""

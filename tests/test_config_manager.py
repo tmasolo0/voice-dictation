@@ -11,12 +11,14 @@ import pytest
 _tmp = tempfile.mkdtemp()
 _config_file = Path(_tmp) / "config.json"
 _dict_file = Path(_tmp) / "dictionary.txt"
+_dict_dir = Path(_tmp) / "dictionaries"
 
 
 @pytest.fixture(autouse=True)
 def _patch_paths():
     with patch("core.config_manager.CONFIG_FILE", _config_file), \
-         patch("core.config_manager.DICTIONARY_FILE", _dict_file):
+         patch("core.config_manager.DICTIONARY_FILE", _dict_file), \
+         patch("core.config_manager.DICTIONARIES_DIR", _dict_dir):
         # Reset singleton for each test
         from core.config_manager import ConfigManager
         ConfigManager._instance = None
@@ -82,13 +84,44 @@ class TestDictionary:
         _dict_file.write_text("Kubernetes\nPostgreSQL\nnginx\n", encoding='utf-8')
         cfg = _fresh_config()
         hotwords = cfg.get_hotwords()
-        assert "Kubernetes" in hotwords
-        assert "PostgreSQL" in hotwords
+        assert "kubernetes" in hotwords  # lowercased
+        assert "postgresql" in hotwords
         assert "nginx" in hotwords
-        # hotwords — пробел-разделённые
         assert "," not in hotwords
 
     def test_empty_dictionary(self):
         _dict_file.unlink(missing_ok=True)
         cfg = _fresh_config()
         assert cfg.get_hotwords() == ""
+
+    def test_domain_dictionaries(self):
+        _dict_file.write_text("базовый\n", encoding='utf-8')
+        _dict_dir.mkdir(exist_ok=True)
+        (_dict_dir / "math.txt").write_text("# Математика\nинтеграл\nградиент\n", encoding='utf-8')
+
+        cfg = _fresh_config()
+        cfg.set('dictionaries', 'active', ['math'])
+        hotwords = cfg.get_hotwords()
+        assert "базовый" in hotwords
+        assert "интеграл" in hotwords
+        assert "градиент" in hotwords
+
+    def test_domain_deduplication(self):
+        _dict_file.write_text("Python\nDocker\n", encoding='utf-8')
+        _dict_dir.mkdir(exist_ok=True)
+        (_dict_dir / "it.txt").write_text("python\ndocker\nnginx\n", encoding='utf-8')
+
+        cfg = _fresh_config()
+        cfg.set('dictionaries', 'active', ['it'])
+        hotwords = cfg.get_hotwords()
+        # Дедупликация: python и docker не дублируются
+        assert hotwords.count("python") == 1
+        assert hotwords.count("docker") == 1
+        assert "nginx" in hotwords
+
+    def test_missing_domain_no_crash(self):
+        _dict_file.write_text("базовый\n", encoding='utf-8')
+        cfg = _fresh_config()
+        cfg.set('dictionaries', 'active', ['nonexistent'])
+        hotwords = cfg.get_hotwords()
+        assert "базовый" in hotwords  # base всё ещё загружается
