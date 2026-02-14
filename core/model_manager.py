@@ -38,6 +38,18 @@ class ModelManager:
         self._bus.model_load_started.emit(model_name)
         threading.Thread(target=self._do_load, args=(model_name,), daemon=True).start()
 
+    @staticmethod
+    def _get_free_vram() -> int | None:
+        """Свободная VRAM в байтах (None если CUDA недоступна)."""
+        try:
+            import torch
+            if torch.cuda.is_available():
+                free, _total = torch.cuda.mem_get_info()
+                return free
+        except ImportError:
+            pass
+        return None
+
     def _do_load(self, model_name: str):
         """Фоновая загрузка модели."""
         try:
@@ -49,11 +61,20 @@ class ModelManager:
             local_path = MODELS_DIR / model_name
             model_path = str(local_path) if local_path.exists() else model_name
 
+            free_before = self._get_free_vram() if device == 'cuda' else None
+
             new_model = WhisperModel(model_path, device=device, compute_type=compute_type)
 
             with self._lock:
                 self._model = new_model
                 self._model_name = model_name
+
+            # Замер VRAM, потреблённой моделью
+            if free_before is not None:
+                free_after = self._get_free_vram()
+                if free_after is not None:
+                    vram_mb = max(0, (free_before - free_after)) // (1024 * 1024)
+                    self._bus.vram_updated.emit(int(vram_mb))
 
             print(f"Модель {model_name} загружена ({device})")
             self._bus.model_load_finished.emit(model_name)

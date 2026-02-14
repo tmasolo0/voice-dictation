@@ -24,6 +24,9 @@ class EventBus(QObject):
     model_load_finished = pyqtSignal(str)     # имя модели
     model_load_failed = pyqtSignal(str)       # сообщение об ошибке
 
+    # VRAM
+    vram_updated = pyqtSignal(int)            # MB видеопамяти модели
+
     # Режимы
     mode_changed = pyqtSignal(str, object)    # ключ, значение
 
