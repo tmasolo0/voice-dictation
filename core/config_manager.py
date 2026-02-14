@@ -12,7 +12,7 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).parent.parent
 CONFIG_FILE = PROJECT_ROOT / "config.json"
 DICTIONARY_FILE = PROJECT_ROOT / "dictionary.txt"
-CONFIG_VERSION = 2
+CONFIG_VERSION = 3
 
 DEFAULT_CONFIG = {
     "version": CONFIG_VERSION,
@@ -37,7 +37,17 @@ DEFAULT_CONFIG = {
         "repetition_penalty": 1.2,              # Штраф за повторение токенов (>1.0 = штраф)
         "no_repeat_ngram_size": 3,              # Запрет повтора N-грамм подряд
         "suppress_tokens": [-1],                # Подавление не-речевых токенов (-1 = дефолтный набор)
-        "hallucination_silence_threshold": 2.0  # Фильтр галлюцинаций на тишине (секунды)
+        "hallucination_silence_threshold": 2.0, # Фильтр галлюцинаций на тишине (секунды)
+        "translate_hotkey": "f10",
+        "vram_cleanup_interval": 10
+    },
+    "dictation": {
+        "translate_to_english": False
+    },
+    "vad": {
+        "threshold": 0.5,
+        "min_speech_ms": 250,
+        "min_silence_ms": 500
     },
     "system": {
         "autostart": False,
@@ -81,14 +91,12 @@ class ConfigManager:
     def _migrate(self):
         """Миграция старого формата конфига."""
         if "version" not in self._config:
-            # Старый формат: window_x, window_y
+            # v0: старый формат с window_x, window_y
             old_x = self._config.pop("window_x", None)
             old_y = self._config.pop("window_y", None)
 
-            # Создаём новый конфиг с дефолтами
             new_config = copy.deepcopy(DEFAULT_CONFIG)
 
-            # Переносим позицию
             if old_x is not None and old_y is not None:
                 new_config["widget"]["position"]["x"] = old_x
                 new_config["widget"]["position"]["y"] = old_y
@@ -96,6 +104,23 @@ class ConfigManager:
             self._config = new_config
             self.save()
             print(f"Конфиг мигрирован на версию {CONFIG_VERSION}")
+        elif self._config["version"] < CONFIG_VERSION:
+            # v1/v2 -> v3: deep merge — добавляет недостающие ключи
+            user_overrides = self._config
+            self._config = copy.deepcopy(DEFAULT_CONFIG)
+            self._deep_update(self._config, user_overrides)
+            self._config["version"] = CONFIG_VERSION
+            self.save()
+            print(f"Конфиг мигрирован на версию {CONFIG_VERSION}")
+
+    @staticmethod
+    def _deep_update(base: dict, override: dict):
+        """Рекурсивное слияние override в base."""
+        for key, value in override.items():
+            if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+                ConfigManager._deep_update(base[key], value)
+            else:
+                base[key] = value
 
     def get(self, *keys, default=None) -> Any:
         """
