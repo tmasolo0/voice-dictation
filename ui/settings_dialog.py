@@ -1,0 +1,684 @@
+"""SettingsDialog -- tabbed QDialog for all application settings."""
+
+import copy
+from pathlib import Path
+
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QSlider,
+    QSpinBox,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from core.config_manager import ConfigManager, DEFAULT_CONFIG, DICTIONARIES_DIR
+from core.model_catalog import MODEL_LABELS, get_local_models
+
+
+# ---------------------------------------------------------------------------
+# Qt key code -> keyboard library string mapping
+# ---------------------------------------------------------------------------
+
+_QT_KEY_MAP = {
+    Qt.Key.Key_F1: "f1", Qt.Key.Key_F2: "f2", Qt.Key.Key_F3: "f3",
+    Qt.Key.Key_F4: "f4", Qt.Key.Key_F5: "f5", Qt.Key.Key_F6: "f6",
+    Qt.Key.Key_F7: "f7", Qt.Key.Key_F8: "f8", Qt.Key.Key_F9: "f9",
+    Qt.Key.Key_F10: "f10", Qt.Key.Key_F11: "f11", Qt.Key.Key_F12: "f12",
+    Qt.Key.Key_A: "a", Qt.Key.Key_B: "b", Qt.Key.Key_C: "c",
+    Qt.Key.Key_D: "d", Qt.Key.Key_E: "e", Qt.Key.Key_F: "f",
+    Qt.Key.Key_G: "g", Qt.Key.Key_H: "h", Qt.Key.Key_I: "i",
+    Qt.Key.Key_J: "j", Qt.Key.Key_K: "k", Qt.Key.Key_L: "l",
+    Qt.Key.Key_M: "m", Qt.Key.Key_N: "n", Qt.Key.Key_O: "o",
+    Qt.Key.Key_P: "p", Qt.Key.Key_Q: "q", Qt.Key.Key_R: "r",
+    Qt.Key.Key_S: "s", Qt.Key.Key_T: "t", Qt.Key.Key_U: "u",
+    Qt.Key.Key_V: "v", Qt.Key.Key_W: "w", Qt.Key.Key_X: "x",
+    Qt.Key.Key_Y: "y", Qt.Key.Key_Z: "z",
+    Qt.Key.Key_0: "0", Qt.Key.Key_1: "1", Qt.Key.Key_2: "2",
+    Qt.Key.Key_3: "3", Qt.Key.Key_4: "4", Qt.Key.Key_5: "5",
+    Qt.Key.Key_6: "6", Qt.Key.Key_7: "7", Qt.Key.Key_8: "8",
+    Qt.Key.Key_9: "9",
+    Qt.Key.Key_Space: "space", Qt.Key.Key_Return: "enter",
+    Qt.Key.Key_Enter: "enter", Qt.Key.Key_Escape: "esc",
+    Qt.Key.Key_Tab: "tab", Qt.Key.Key_Backspace: "backspace",
+    Qt.Key.Key_Delete: "delete", Qt.Key.Key_Insert: "insert",
+    Qt.Key.Key_Home: "home", Qt.Key.Key_End: "end",
+    Qt.Key.Key_PageUp: "page up", Qt.Key.Key_PageDown: "page down",
+    Qt.Key.Key_Up: "up", Qt.Key.Key_Down: "down",
+    Qt.Key.Key_Left: "left", Qt.Key.Key_Right: "right",
+    Qt.Key.Key_CapsLock: "caps lock", Qt.Key.Key_NumLock: "num lock",
+    Qt.Key.Key_ScrollLock: "scroll lock",
+    Qt.Key.Key_Print: "print screen", Qt.Key.Key_Pause: "pause",
+    Qt.Key.Key_Menu: "menu",
+}
+
+# Modifier-only keys (ignored as standalone)
+_MODIFIER_KEYS = {
+    Qt.Key.Key_Control, Qt.Key.Key_Shift, Qt.Key.Key_Alt, Qt.Key.Key_Meta,
+}
+
+
+class HotkeyEdit(QLineEdit):
+    """Custom widget that captures a hotkey (single key or combo) on click."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setReadOnly(True)
+        self._hotkey = ""
+        self._recording = False
+
+    def hotkey(self) -> str:
+        return self._hotkey
+
+    def setHotkey(self, value: str):
+        self._hotkey = value
+        self.setText(value if value else "")
+
+    # -- events ---------------------------------------------------------------
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        self._recording = True
+        self.setText("Нажмите клавишу...")
+
+    def focusOutEvent(self, event):
+        super().focusOutEvent(event)
+        self._recording = False
+        self.setText(self._hotkey if self._hotkey else "")
+
+    def keyPressEvent(self, event):
+        if not self._recording:
+            return
+
+        key = event.key()
+
+        # Ignore standalone modifier presses
+        if key in _MODIFIER_KEYS:
+            return
+
+        key_str = _QT_KEY_MAP.get(Qt.Key(key))
+        if key_str is None:
+            return
+
+        parts = []
+        mods = event.modifiers()
+        if mods & Qt.KeyboardModifier.ControlModifier:
+            parts.append("ctrl")
+        if mods & Qt.KeyboardModifier.AltModifier:
+            parts.append("alt")
+        if mods & Qt.KeyboardModifier.ShiftModifier:
+            parts.append("shift")
+        parts.append(key_str)
+
+        combo = "+".join(parts)
+        self._hotkey = combo
+        self._recording = False
+        self.setText(combo)
+        self.clearFocus()
+
+
+# ---------------------------------------------------------------------------
+# Languages for recognition
+# ---------------------------------------------------------------------------
+
+_LANGUAGES = [
+    ("auto", "Авто"),
+    ("ru", "Русский"),
+    ("en", "English"),
+    ("de", "Deutsch"),
+    ("fr", "Francais"),
+    ("es", "Espanol"),
+    ("zh", "Chinese"),
+    ("ja", "Japanese"),
+    ("ko", "Korean"),
+]
+
+
+class SettingsDialog(QDialog):
+    """Tabbed settings dialog with 5 tabs and OK/Cancel/Reset to Defaults."""
+
+    RESTART_KEYS = {"recognition.model", "recognition.device", "recognition.compute_type"}
+
+    def __init__(self, config: ConfigManager, parent=None):
+        super().__init__(parent)
+        self._config = config
+        self._changed_settings: dict = {}
+
+        self.setWindowTitle("Настройки")
+        self.setMinimumSize(550, 500)
+        self.setWindowFlags(
+            Qt.WindowType.Dialog
+            | Qt.WindowType.WindowCloseButtonHint
+            | Qt.WindowType.WindowTitleHint
+        )
+
+        self._build_ui()
+        self._load_values()
+        self._initial_values = self._collect_all_values()
+
+    # ======================================================================
+    # UI Construction
+    # ======================================================================
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+
+        self._tabs = QTabWidget()
+        layout.addWidget(self._tabs)
+
+        self._build_tab_general()
+        self._build_tab_recognition()
+        self._build_tab_widget()
+        self._build_tab_postprocessing()
+        self._build_tab_dictionary()
+
+        # Button box
+        self._btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        self._btn_reset = self._btn_box.addButton(
+            "Сброс к умолчаниям", QDialogButtonBox.ButtonRole.ResetRole
+        )
+        self._btn_box.accepted.connect(self._on_ok)
+        self._btn_box.rejected.connect(self._on_cancel)
+        self._btn_reset.clicked.connect(self._on_reset_defaults)
+        layout.addWidget(self._btn_box)
+
+    # -- Tab 1: General ---------------------------------------------------
+
+    def _build_tab_general(self):
+        tab = QWidget()
+        form = QFormLayout(tab)
+
+        self._hotkey_edit = HotkeyEdit()
+        form.addRow("Горячая клавиша записи:", self._hotkey_edit)
+
+        self._translate_hotkey_edit = HotkeyEdit()
+        form.addRow("Горячая клавиша перевода:", self._translate_hotkey_edit)
+
+        self._language_combo = QComboBox()
+        for code, label in _LANGUAGES:
+            self._language_combo.addItem(label, code)
+        form.addRow("Язык распознавания:", self._language_combo)
+
+        self._autostart_check = QCheckBox("Запускать при старте Windows")
+        form.addRow(self._autostart_check)
+
+        self._start_minimized_check = QCheckBox("Запуск в свёрнутом виде")
+        form.addRow(self._start_minimized_check)
+
+        self._preview_enabled_check = QCheckBox("Показывать превью перед вставкой")
+        form.addRow(self._preview_enabled_check)
+
+        self._auto_insert_delay_spin = QSpinBox()
+        self._auto_insert_delay_spin.setRange(0, 30)
+        self._auto_insert_delay_spin.setSuffix(" сек")
+        delay_layout = QHBoxLayout()
+        delay_layout.addWidget(self._auto_insert_delay_spin)
+        delay_hint = QLabel("0 = мгновенная вставка")
+        delay_hint.setStyleSheet("color: gray;")
+        delay_layout.addWidget(delay_hint)
+        delay_layout.addStretch()
+        form.addRow("Задержка авто-вставки:", delay_layout)
+
+        self._tabs.addTab(tab, "Основные")
+
+    # -- Tab 2: Recognition -----------------------------------------------
+
+    def _build_tab_recognition(self):
+        tab = QWidget()
+        outer = QVBoxLayout(tab)
+
+        # --- Model group ---
+        model_group = QGroupBox("Модель")
+        model_form = QFormLayout(model_group)
+
+        self._model_combo = QComboBox()
+        local_models = get_local_models()
+        for m in local_models:
+            label = MODEL_LABELS.get(m, m)
+            self._model_combo.addItem(f"{label} ({m})", m)
+        if not local_models:
+            self._model_combo.addItem("(нет моделей)", "")
+        model_form.addRow("Модель \u2605:", self._model_combo)
+
+        self._device_combo = QComboBox()
+        self._device_combo.addItem("CUDA (GPU)", "cuda")
+        self._device_combo.addItem("CPU", "cpu")
+        model_form.addRow("Устройство \u2605:", self._device_combo)
+
+        self._compute_combo = QComboBox()
+        for val in ("float16", "int8_float16", "int8"):
+            self._compute_combo.addItem(val, val)
+        model_form.addRow("Точность \u2605:", self._compute_combo)
+
+        restart_label = QLabel("\u2605 = требует перезапуск")
+        restart_label.setStyleSheet("color: gray; font-style: italic;")
+        model_form.addRow(restart_label)
+
+        outer.addWidget(model_group)
+
+        # --- Quality group ---
+        quality_group = QGroupBox("Параметры качества")
+        qf = QFormLayout(quality_group)
+
+        self._beam_size_spin = QSpinBox()
+        self._beam_size_spin.setRange(1, 10)
+        qf.addRow("beam_size:", self._beam_size_spin)
+        qf.addRow("", QLabel("Ширина beam search (больше = точнее, медленнее)"))
+
+        self._temperature_spin = QDoubleSpinBox()
+        self._temperature_spin.setRange(0.0, 1.0)
+        self._temperature_spin.setSingleStep(0.1)
+        self._temperature_spin.setDecimals(1)
+        qf.addRow("temperature:", self._temperature_spin)
+        qf.addRow("", QLabel("Температура сэмплирования (0 = жадный декодинг)"))
+
+        self._condition_prev_check = QCheckBox("Использовать предыдущий сегмент как контекст")
+        qf.addRow("condition_on_previous_text:", self._condition_prev_check)
+
+        self._compression_spin = QDoubleSpinBox()
+        self._compression_spin.setRange(1.0, 5.0)
+        self._compression_spin.setSingleStep(0.1)
+        self._compression_spin.setDecimals(1)
+        qf.addRow("compression_ratio_threshold:", self._compression_spin)
+        qf.addRow("", QLabel("Порог сжатия — фильтр повторяющегося текста"))
+
+        self._log_prob_spin = QDoubleSpinBox()
+        self._log_prob_spin.setRange(-5.0, 0.0)
+        self._log_prob_spin.setSingleStep(0.1)
+        self._log_prob_spin.setDecimals(1)
+        qf.addRow("log_prob_threshold:", self._log_prob_spin)
+        qf.addRow("", QLabel("Порог вероятности — фильтр низкой уверенности"))
+
+        self._no_speech_spin = QDoubleSpinBox()
+        self._no_speech_spin.setRange(0.0, 1.0)
+        self._no_speech_spin.setSingleStep(0.1)
+        self._no_speech_spin.setDecimals(1)
+        qf.addRow("no_speech_threshold:", self._no_speech_spin)
+        qf.addRow("", QLabel("Порог тишины — пропуск тихих сегментов"))
+
+        self._repetition_spin = QDoubleSpinBox()
+        self._repetition_spin.setRange(1.0, 3.0)
+        self._repetition_spin.setSingleStep(0.1)
+        self._repetition_spin.setDecimals(1)
+        qf.addRow("repetition_penalty:", self._repetition_spin)
+        qf.addRow("", QLabel("Штраф за повторение (>1.0 = штраф)"))
+
+        self._no_repeat_ngram_spin = QSpinBox()
+        self._no_repeat_ngram_spin.setRange(0, 10)
+        qf.addRow("no_repeat_ngram_size:", self._no_repeat_ngram_spin)
+        qf.addRow("", QLabel("Запрет повтора N-грамм подряд"))
+
+        self._hallucination_spin = QDoubleSpinBox()
+        self._hallucination_spin.setRange(0.0, 10.0)
+        self._hallucination_spin.setSingleStep(0.5)
+        self._hallucination_spin.setDecimals(1)
+        qf.addRow("hallucination_silence_threshold:", self._hallucination_spin)
+        qf.addRow("", QLabel("Фильтр галлюцинаций на тишине (секунды)"))
+
+        outer.addWidget(quality_group)
+
+        # --- VAD group ---
+        vad_group = QGroupBox("VAD (детектор речи)")
+        vf = QFormLayout(vad_group)
+
+        self._vad_threshold_spin = QDoubleSpinBox()
+        self._vad_threshold_spin.setRange(0.0, 1.0)
+        self._vad_threshold_spin.setSingleStep(0.05)
+        self._vad_threshold_spin.setDecimals(2)
+        vf.addRow("threshold:", self._vad_threshold_spin)
+
+        self._vad_min_speech_spin = QSpinBox()
+        self._vad_min_speech_spin.setRange(50, 2000)
+        self._vad_min_speech_spin.setSuffix(" мс")
+        vf.addRow("min_speech_ms:", self._vad_min_speech_spin)
+
+        self._vad_min_silence_spin = QSpinBox()
+        self._vad_min_silence_spin.setRange(100, 3000)
+        self._vad_min_silence_spin.setSuffix(" мс")
+        vf.addRow("min_silence_ms:", self._vad_min_silence_spin)
+
+        outer.addWidget(vad_group)
+        outer.addStretch()
+
+        self._tabs.addTab(tab, "Распознавание")
+
+    # -- Tab 3: Widget ----------------------------------------------------
+
+    def _build_tab_widget(self):
+        tab = QWidget()
+        form = QFormLayout(tab)
+
+        slider_layout = QHBoxLayout()
+        self._size_slider = QSlider(Qt.Orientation.Horizontal)
+        self._size_slider.setRange(50, 300)
+        self._size_label = QLabel("150")
+        self._size_slider.valueChanged.connect(
+            lambda v: self._size_label.setText(str(v))
+        )
+        slider_layout.addWidget(self._size_slider)
+        slider_layout.addWidget(self._size_label)
+        form.addRow("Размер круга (пикселей):", slider_layout)
+
+        self._hide_fullscreen_check = QCheckBox("Скрывать в полноэкранных приложениях")
+        form.addRow(self._hide_fullscreen_check)
+
+        self._tabs.addTab(tab, "Виджет")
+
+    # -- Tab 4: Post-processing -------------------------------------------
+
+    def _build_tab_postprocessing(self):
+        tab = QWidget()
+        form = QFormLayout(tab)
+
+        self._punct_check = QCheckBox("Нормализация пробелов вокруг знаков препинания")
+        form.addRow(self._punct_check)
+
+        self._capital_check = QCheckBox("Заглавная буква в начале и после .!?")
+        form.addRow(self._capital_check)
+
+        self._trailing_dot_check = QCheckBox("Добавлять точку в конце, если нет пунктуации")
+        form.addRow(self._trailing_dot_check)
+
+        self._tabs.addTab(tab, "Постобработка")
+
+    # -- Tab 5: Dictionary ------------------------------------------------
+
+    def _build_tab_dictionary(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        hint = QLabel("Выберите доменные словари для улучшения распознавания терминов")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        self._dict_checks: dict[str, QCheckBox] = {}
+        active = self._config.get("dictionaries", "active", default=[])
+
+        if DICTIONARIES_DIR.exists():
+            for f in sorted(DICTIONARIES_DIR.iterdir()):
+                if f.suffix == ".txt" and f.is_file():
+                    domain = f.stem
+                    display = domain.upper() if domain.lower() == domain and len(domain) <= 3 else domain.capitalize()
+                    cb = QCheckBox(display)
+                    cb.setChecked(domain in active)
+                    self._dict_checks[domain] = cb
+                    layout.addWidget(cb)
+
+        layout.addStretch()
+        self._tabs.addTab(tab, "Словари")
+
+    # ======================================================================
+    # Load / Collect values
+    # ======================================================================
+
+    def _load_values(self):
+        c = self._config
+
+        # General
+        self._hotkey_edit.setHotkey(c.get("recognition", "hotkey", default="f9"))
+        self._translate_hotkey_edit.setHotkey(c.get("recognition", "translate_hotkey", default="f10"))
+
+        lang = c.get("recognition", "language", default="auto")
+        idx = self._language_combo.findData(lang)
+        if idx >= 0:
+            self._language_combo.setCurrentIndex(idx)
+
+        self._autostart_check.setChecked(c.get("system", "autostart", default=False))
+        self._start_minimized_check.setChecked(c.get("system", "start_minimized", default=False))
+        self._preview_enabled_check.setChecked(c.get("preview", "enabled", default=False))
+        self._auto_insert_delay_spin.setValue(c.get("preview", "auto_insert_delay", default=5))
+
+        # Recognition
+        model = c.get("recognition", "model", default="large-v3-turbo")
+        idx = self._model_combo.findData(model)
+        if idx >= 0:
+            self._model_combo.setCurrentIndex(idx)
+
+        device = c.get("recognition", "device", default="cuda")
+        idx = self._device_combo.findData(device)
+        if idx >= 0:
+            self._device_combo.setCurrentIndex(idx)
+
+        compute = c.get("recognition", "compute_type", default="float16")
+        idx = self._compute_combo.findData(compute)
+        if idx >= 0:
+            self._compute_combo.setCurrentIndex(idx)
+
+        self._beam_size_spin.setValue(c.get("recognition", "beam_size", default=5))
+        self._temperature_spin.setValue(c.get("recognition", "temperature", default=0.3))
+        self._condition_prev_check.setChecked(c.get("recognition", "condition_on_previous_text", default=False))
+        self._compression_spin.setValue(c.get("recognition", "compression_ratio_threshold", default=2.4))
+        self._log_prob_spin.setValue(c.get("recognition", "log_prob_threshold", default=-1.0))
+        self._no_speech_spin.setValue(c.get("recognition", "no_speech_threshold", default=0.6))
+        self._repetition_spin.setValue(c.get("recognition", "repetition_penalty", default=1.2))
+        self._no_repeat_ngram_spin.setValue(c.get("recognition", "no_repeat_ngram_size", default=3))
+        self._hallucination_spin.setValue(c.get("recognition", "hallucination_silence_threshold", default=2.0))
+
+        # VAD
+        self._vad_threshold_spin.setValue(c.get("vad", "threshold", default=0.5))
+        self._vad_min_speech_spin.setValue(c.get("vad", "min_speech_ms", default=250))
+        self._vad_min_silence_spin.setValue(c.get("vad", "min_silence_ms", default=500))
+
+        # Widget
+        self._size_slider.setValue(c.get("widget", "size", default=150))
+        self._size_label.setText(str(self._size_slider.value()))
+        self._hide_fullscreen_check.setChecked(c.get("widget", "hide_in_fullscreen", default=True))
+
+        # Post-processing
+        self._punct_check.setChecked(c.get("postprocessing", "punctuation", default=True))
+        self._capital_check.setChecked(c.get("postprocessing", "capitalization", default=True))
+        self._trailing_dot_check.setChecked(c.get("postprocessing", "trailing_dot", default=True))
+
+        # Dictionary -- already loaded during build
+
+    def _collect_all_values(self) -> dict:
+        """Snapshot of all widget values as flat dict keyed by config path."""
+        vals = {}
+
+        # General
+        vals["recognition.hotkey"] = self._hotkey_edit.hotkey()
+        vals["recognition.translate_hotkey"] = self._translate_hotkey_edit.hotkey()
+        vals["recognition.language"] = self._language_combo.currentData()
+        vals["system.autostart"] = self._autostart_check.isChecked()
+        vals["system.start_minimized"] = self._start_minimized_check.isChecked()
+        vals["preview.enabled"] = self._preview_enabled_check.isChecked()
+        vals["preview.auto_insert_delay"] = self._auto_insert_delay_spin.value()
+
+        # Recognition
+        vals["recognition.model"] = self._model_combo.currentData()
+        vals["recognition.device"] = self._device_combo.currentData()
+        vals["recognition.compute_type"] = self._compute_combo.currentData()
+        vals["recognition.beam_size"] = self._beam_size_spin.value()
+        vals["recognition.temperature"] = self._temperature_spin.value()
+        vals["recognition.condition_on_previous_text"] = self._condition_prev_check.isChecked()
+        vals["recognition.compression_ratio_threshold"] = self._compression_spin.value()
+        vals["recognition.log_prob_threshold"] = self._log_prob_spin.value()
+        vals["recognition.no_speech_threshold"] = self._no_speech_spin.value()
+        vals["recognition.repetition_penalty"] = self._repetition_spin.value()
+        vals["recognition.no_repeat_ngram_size"] = self._no_repeat_ngram_spin.value()
+        vals["recognition.hallucination_silence_threshold"] = self._hallucination_spin.value()
+
+        # VAD
+        vals["vad.threshold"] = self._vad_threshold_spin.value()
+        vals["vad.min_speech_ms"] = self._vad_min_speech_spin.value()
+        vals["vad.min_silence_ms"] = self._vad_min_silence_spin.value()
+
+        # Widget
+        vals["widget.size"] = self._size_slider.value()
+        vals["widget.hide_in_fullscreen"] = self._hide_fullscreen_check.isChecked()
+
+        # Post-processing
+        vals["postprocessing.punctuation"] = self._punct_check.isChecked()
+        vals["postprocessing.capitalization"] = self._capital_check.isChecked()
+        vals["postprocessing.trailing_dot"] = self._trailing_dot_check.isChecked()
+
+        # Dictionary
+        vals["dictionaries.active"] = sorted(
+            d for d, cb in self._dict_checks.items() if cb.isChecked()
+        )
+
+        return vals
+
+    # ======================================================================
+    # Change tracking
+    # ======================================================================
+
+    def _has_unsaved_changes(self) -> bool:
+        return self._collect_all_values() != self._initial_values
+
+    def _get_changed_keys(self) -> set[str]:
+        current = self._collect_all_values()
+        return {k for k, v in current.items() if v != self._initial_values.get(k)}
+
+    def _get_restart_needed(self) -> set[str]:
+        return self._get_changed_keys() & self.RESTART_KEYS
+
+    @property
+    def changed_settings(self) -> dict:
+        return self._changed_settings
+
+    # ======================================================================
+    # Button handlers
+    # ======================================================================
+
+    def _on_ok(self):
+        current = self._collect_all_values()
+        changed = {k for k, v in current.items() if v != self._initial_values.get(k)}
+
+        # Write all values to config
+        for key, value in current.items():
+            parts = key.split(".")
+            self._config.set(*parts, value)
+
+        self._config.save()
+
+        # Track changed sections
+        self._changed_settings = {}
+        for k in changed:
+            section = k.split(".")[0]
+            self._changed_settings.setdefault(section, []).append(k)
+
+        # Check restart-required
+        restart_keys = changed & self.RESTART_KEYS
+        if restart_keys:
+            QMessageBox.information(
+                self,
+                "Требуется перезапуск",
+                "Перезапустите приложение для применения изменений модели/устройства.",
+            )
+
+        self.accept()
+
+    def _on_cancel(self):
+        if self._has_unsaved_changes():
+            reply = QMessageBox.question(
+                self,
+                "Несохранённые изменения",
+                "Есть несохранённые изменения. Закрыть?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        self.reject()
+
+    def closeEvent(self, event):
+        if self._has_unsaved_changes():
+            reply = QMessageBox.question(
+                self,
+                "Несохранённые изменения",
+                "Есть несохранённые изменения. Закрыть?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+        event.accept()
+
+    def _on_reset_defaults(self):
+        idx = self._tabs.currentIndex()
+        defaults = copy.deepcopy(DEFAULT_CONFIG)
+
+        if idx == 0:
+            self._reset_general(defaults)
+        elif idx == 1:
+            self._reset_recognition(defaults)
+        elif idx == 2:
+            self._reset_widget(defaults)
+        elif idx == 3:
+            self._reset_postprocessing(defaults)
+        elif idx == 4:
+            self._reset_dictionary(defaults)
+
+    # ======================================================================
+    # Reset helpers (per tab)
+    # ======================================================================
+
+    def _reset_general(self, d: dict):
+        self._hotkey_edit.setHotkey(d["recognition"]["hotkey"])
+        self._translate_hotkey_edit.setHotkey(d["recognition"]["translate_hotkey"])
+
+        idx = self._language_combo.findData(d["recognition"]["language"])
+        if idx >= 0:
+            self._language_combo.setCurrentIndex(idx)
+
+        self._autostart_check.setChecked(d["system"]["autostart"])
+        self._start_minimized_check.setChecked(d["system"]["start_minimized"])
+        self._preview_enabled_check.setChecked(d["preview"]["enabled"])
+        self._auto_insert_delay_spin.setValue(d["preview"]["auto_insert_delay"])
+
+    def _reset_recognition(self, d: dict):
+        model = d["recognition"]["model"]
+        idx = self._model_combo.findData(model)
+        if idx >= 0:
+            self._model_combo.setCurrentIndex(idx)
+
+        idx = self._device_combo.findData(d["recognition"]["device"])
+        if idx >= 0:
+            self._device_combo.setCurrentIndex(idx)
+
+        idx = self._compute_combo.findData(d["recognition"]["compute_type"])
+        if idx >= 0:
+            self._compute_combo.setCurrentIndex(idx)
+
+        self._beam_size_spin.setValue(d["recognition"]["beam_size"])
+        self._temperature_spin.setValue(d["recognition"]["temperature"])
+        self._condition_prev_check.setChecked(d["recognition"]["condition_on_previous_text"])
+        self._compression_spin.setValue(d["recognition"]["compression_ratio_threshold"])
+        self._log_prob_spin.setValue(d["recognition"]["log_prob_threshold"])
+        self._no_speech_spin.setValue(d["recognition"]["no_speech_threshold"])
+        self._repetition_spin.setValue(d["recognition"]["repetition_penalty"])
+        self._no_repeat_ngram_spin.setValue(d["recognition"]["no_repeat_ngram_size"])
+        self._hallucination_spin.setValue(d["recognition"]["hallucination_silence_threshold"])
+
+        self._vad_threshold_spin.setValue(d["vad"]["threshold"])
+        self._vad_min_speech_spin.setValue(d["vad"]["min_speech_ms"])
+        self._vad_min_silence_spin.setValue(d["vad"]["min_silence_ms"])
+
+    def _reset_widget(self, d: dict):
+        self._size_slider.setValue(d["widget"]["size"])
+        self._hide_fullscreen_check.setChecked(d["widget"]["hide_in_fullscreen"])
+
+    def _reset_postprocessing(self, d: dict):
+        self._punct_check.setChecked(d["postprocessing"]["punctuation"])
+        self._capital_check.setChecked(d["postprocessing"]["capitalization"])
+        self._trailing_dot_check.setChecked(d["postprocessing"]["trailing_dot"])
+
+    def _reset_dictionary(self, d: dict):
+        active = d["dictionaries"]["active"]
+        for domain, cb in self._dict_checks.items():
+            cb.setChecked(domain in active)
