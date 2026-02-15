@@ -145,7 +145,7 @@ class PreviewPopup(QWidget):
         self._text_edit.setStyleSheet("")
         self._text_edit.setPlainText(text)
 
-        self._position_near_widget()
+        self._position_near_cursor()
         self.show()
         self._register_hotkeys()
 
@@ -155,41 +155,39 @@ class PreviewPopup(QWidget):
         self._timer_bar.setVisible(True)
         self._auto_timer.start()
 
-    def _position_near_widget(self):
-        """Позиционировать popup слева от parent_widget, с fallback вправо."""
-        pw = self._parent_widget
-        pw_pos = pw.pos()
-        pw_size = pw.size()
+    def _position_near_cursor(self):
+        """Позиционировать popup рядом с курсором мыши."""
+        from PyQt6.QtGui import QCursor
+        from PyQt6.QtWidgets import QApplication
+
+        cursor_pos = QCursor.pos()
 
         popup_h = self.sizeHint().height()
         self.setFixedHeight(max(popup_h, 120))
         popup_h = self.height()
 
-        x_left = pw_pos.x() - POPUP_WIDTH - POPUP_GAP
-        x_right = pw_pos.x() + pw_size.width() + POPUP_GAP
-        y = pw_pos.y()
-
-        screen = self._get_screen_geometry()
-
-        if x_left >= screen.x():
-            x = x_left
-        else:
-            x = x_right
-
-        if y + popup_h > screen.y() + screen.height():
-            y = screen.y() + screen.height() - popup_h
-        if y < screen.y():
-            y = screen.y()
-
-        self.move(x, y)
-
-    def _get_screen_geometry(self):
-        """Получить геометрию экрана, на котором находится parent_widget."""
-        from PyQt6.QtWidgets import QApplication
-        screen = QApplication.screenAt(self._parent_widget.pos())
+        screen = QApplication.screenAt(cursor_pos)
         if screen is None:
             screen = QApplication.primaryScreen()
-        return screen.availableGeometry()
+        sg = screen.availableGeometry()
+
+        # Popup справа-снизу от курсора с небольшим отступом
+        x = cursor_pos.x() + POPUP_GAP
+        y = cursor_pos.y() + POPUP_GAP
+
+        # Если не влезает вправо — показать слева от курсора
+        if x + POPUP_WIDTH > sg.x() + sg.width():
+            x = cursor_pos.x() - POPUP_WIDTH - POPUP_GAP
+
+        # Если не влезает вниз — показать сверху от курсора
+        if y + popup_h > sg.y() + sg.height():
+            y = cursor_pos.y() - popup_h - POPUP_GAP
+
+        # Финальная коррекция: не выходить за края экрана
+        x = max(sg.x(), min(x, sg.x() + sg.width() - POPUP_WIDTH))
+        y = max(sg.y(), min(y, sg.y() + sg.height() - popup_h))
+
+        self.move(x, y)
 
     # ── Global keyboard hooks ────────────────────────────────
 
