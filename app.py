@@ -14,6 +14,7 @@ from core.hotkeys import HotkeyManager
 from core.history_manager import HistoryManager
 from ui.widget import DictationWidget
 from ui.tray import TrayManager
+from ui.preview_popup import PreviewPopup
 
 
 MODEL_TURBO = 'large-v3-turbo'
@@ -39,6 +40,14 @@ class Application:
         # UI
         self.widget = DictationWidget(self.bus, config)
         self.tray = TrayManager(self.bus, config, self.widget)
+
+        # Preview popup — перехватываем text_processed до TextInserter
+        self.bus.text_processed.disconnect(self.inserter._on_text_ready)
+        self.bus.text_processed.connect(self._on_text_processed)
+
+        self.preview_popup = PreviewPopup(self.widget)
+        self.preview_popup.insert_requested.connect(self._on_preview_insert)
+        self.preview_popup.cancel_requested.connect(self._on_preview_cancel)
 
         # State machine wiring
         self.bus.recording_start.connect(lambda _: self.state_machine.transition(AppState.RECORDING))
@@ -84,6 +93,25 @@ class Application:
         print(f"Режим: {'EN (перевод)' if translate_mode else 'RU/EN (авто)'}")
         print("ПКМ → модель / перевод")
         print("=" * 40)
+
+    def _on_text_processed(self, text: str):
+        """Координация preview popup: показать или вставить мгновенно."""
+        preview_enabled = config.get('preview', 'enabled', default=False)
+        auto_delay = config.get('preview', 'auto_insert_delay', default=5)
+
+        if not preview_enabled or auto_delay == 0:
+            self.inserter._on_text_ready(text)
+            return
+
+        self.preview_popup.show_preview(text, auto_delay)
+
+    def _on_preview_insert(self, text: str):
+        """Вставка текста из preview popup (возможно отредактированного)."""
+        self.inserter._on_text_ready(text)
+
+    def _on_preview_cancel(self):
+        """Отмена вставки из preview popup."""
+        self.state_machine.transition(AppState.READY)
 
     def _on_text_recognized(self, text, metadata):
         """Обработка пустого результата — вернуть в READY."""
