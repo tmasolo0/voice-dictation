@@ -143,6 +143,10 @@ class Application:
 
     def _on_mode_changed(self, key, value):
         """Централизованная обработка переключения режимов."""
+        if key == "open_history":
+            self._open_history()
+            return
+
         if key == "open_settings":
             self._open_settings()
             return
@@ -173,6 +177,17 @@ class Application:
             new_model = MODEL_TRANSLATE if new_value else dictation_model
             self.model_manager.load_model(new_model)
 
+    def _open_history(self):
+        """Открыть диалог истории диктовок."""
+        import win32gui
+        from ui.history_dialog import HistoryDialog
+
+        self.hotkeys.set_enabled(False)
+        target_hwnd = win32gui.GetForegroundWindow()
+        dialog = HistoryDialog(self.history, target_hwnd=target_hwnd, parent=self.widget)
+        dialog.exec()
+        self.hotkeys.set_enabled(True)
+
     def _open_settings(self):
         """Открыть диалог настроек с hot-apply логикой."""
         from ui.settings_dialog import SettingsDialog
@@ -183,6 +198,7 @@ class Application:
         # Снапшот для сравнения
         old_hotkey = config.get('recognition', 'hotkey', default='f9')
         old_translate_hotkey = config.get('recognition', 'translate_hotkey', default='f10')
+        old_history_hotkey = config.get('recognition', 'history_hotkey', default='ctrl+h')
         old_size = config.get('widget', 'size', default=100)
 
         dialog = SettingsDialog(config, parent=self.widget)
@@ -195,10 +211,13 @@ class Application:
             # Hot-apply: горячие клавиши
             new_hotkey = config.get('recognition', 'hotkey', default='f9')
             new_translate_hotkey = config.get('recognition', 'translate_hotkey', default='f10')
+            new_history_hotkey = config.get('recognition', 'history_hotkey', default='ctrl+h')
             if new_hotkey != old_hotkey:
                 self.hotkeys.update_hotkey(new_hotkey)
             if new_translate_hotkey != old_translate_hotkey:
                 self.hotkeys.update_translate_hotkey(new_translate_hotkey)
+            if new_history_hotkey != old_history_hotkey:
+                self.hotkeys.update_history_hotkey(new_history_hotkey)
 
             # Hot-apply: размер виджета
             new_size = config.get('widget', 'size', default=100)
