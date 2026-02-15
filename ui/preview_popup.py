@@ -1,14 +1,12 @@
 """PreviewPopup — немодальный popup для предпросмотра распознанного текста."""
 
-import win32gui
-import win32con
+import keyboard
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QProgressBar, QPushButton
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QScreen
 
 
 POPUP_WIDTH = 350
@@ -62,19 +60,27 @@ class PreviewPopup(QWidget):
     cancel_requested = pyqtSignal()
     redictate_requested = pyqtSignal()
 
+    # Thread-safe triggers для глобальных keyboard hooks
+    _trigger_insert = pyqtSignal()
+    _trigger_cancel = pyqtSignal()
+
     def __init__(self, parent_widget):
         super().__init__(None)
         self._parent_widget = parent_widget
         self._total_ms = 0
         self._remaining_ms = 0
         self._editing = False
+        self._waiting = False
+        self._hk_enter = None
+        self._hk_esc = None
 
         self.setObjectName("PreviewPopup")
         self.setWindowFlags(
-            Qt.WindowType.ToolTip |
+            Qt.WindowType.Tool |
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint
         )
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setFixedWidth(POPUP_WIDTH)
 
         self._setup_ui()
@@ -83,6 +89,11 @@ class PreviewPopup(QWidget):
         self._auto_timer = QTimer(self)
         self._auto_timer.setInterval(TIMER_TICK_MS)
         self._auto_timer.timeout.connect(self._on_timer_tick)
+
+        # Keyboard hook callbacks приходят из другого потока —
+        # сигналы автоматически маршрутизируются в main thread через QueuedConnection
+        self._trigger_insert.connect(self._on_insert)
+        self._trigger_cancel.connect(self._on_cancel)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -121,6 +132,8 @@ class PreviewPopup(QWidget):
 
         layout.addLayout(btn_layout)
 
+    # ── Show / Position ──────────────────────────────────────
+
     def show_preview(self, text: str, auto_delay: int):
         """Показать popup с текстом и запустить таймер авто-вставки."""
         if auto_delay == 0:
@@ -128,32 +141,19 @@ class PreviewPopup(QWidget):
             return
 
         self._editing = False
+        self._waiting = False
+        self._text_edit.setStyleSheet("")
         self._text_edit.setPlainText(text)
 
         self._position_near_widget()
         self.show()
-        self._apply_noactivate()
+        self._register_hotkeys()
 
         self._total_ms = auto_delay * 1000
         self._remaining_ms = self._total_ms
         self._timer_bar.setValue(PROGRESS_MAX)
         self._timer_bar.setVisible(True)
         self._auto_timer.start()
-
-    def _apply_noactivate(self):
-        """Установить WS_EX_NOACTIVATE чтобы popup не крал фокус."""
-        try:
-            hwnd = int(self.winId())
-            ex_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-            ex_style |= win32con.WS_EX_NOACTIVATE | win32con.WS_EX_TOPMOST
-            win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, ex_style)
-            win32gui.SetWindowPos(
-                hwnd, win32con.HWND_TOPMOST,
-                0, 0, 0, 0,
-                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
-            )
-        except Exception as e:
-            print(f"PreviewPopup: WS_EX_NOACTIVATE failed: {e}")
 
     def _position_near_widget(self):
         """Позиционировать popup слева от parent_widget, с fallback вправо."""
@@ -171,13 +171,11 @@ class PreviewPopup(QWidget):
 
         screen = self._get_screen_geometry()
 
-        # Выбор стороны
         if x_left >= screen.x():
             x = x_left
         else:
             x = x_right
 
-        # Вертикальная коррекция
         if y + popup_h > screen.y() + screen.height():
             y = screen.y() + screen.height() - popup_h
         if y < screen.y():
@@ -193,6 +191,31 @@ class PreviewPopup(QWidget):
             screen = QApplication.primaryScreen()
         return screen.availableGeometry()
 
+    # ── Global keyboard hooks ────────────────────────────────
+
+    def _register_hotkeys(self):
+        """Зарегистрировать глобальные Enter/Esc хуки (suppress — не пропускать в целевое окно)."""
+        self._unregister_hotkeys()
+        self._hk_enter = keyboard.add_hotkey('enter', self._trigger_insert.emit, suppress=True)
+        self._hk_esc = keyboard.add_hotkey('escape', self._trigger_cancel.emit, suppress=True)
+
+    def _unregister_hotkeys(self):
+        """Снять глобальные Enter/Esc хуки."""
+        if self._hk_enter is not None:
+            try:
+                keyboard.remove_hotkey(self._hk_enter)
+            except (KeyError, ValueError):
+                pass
+            self._hk_enter = None
+        if self._hk_esc is not None:
+            try:
+                keyboard.remove_hotkey(self._hk_esc)
+            except (KeyError, ValueError):
+                pass
+            self._hk_esc = None
+
+    # ── Timer ────────────────────────────────────────────────
+
     def _on_timer_tick(self):
         self._remaining_ms -= TIMER_TICK_MS
         if self._remaining_ms <= 0:
@@ -206,12 +229,17 @@ class PreviewPopup(QWidget):
 
     def _on_text_changed(self):
         """При редактировании текста пользователем — остановить таймер."""
-        if not self._editing and self._auto_timer.isActive():
+        if not self._editing and not self._waiting and self._auto_timer.isActive():
             self._editing = True
             self._auto_timer.stop()
             self._timer_bar.setVisible(False)
 
+    # ── Actions ──────────────────────────────────────────────
+
     def _on_insert(self):
+        if not self.isVisible() or self._waiting:
+            return
+        self._unregister_hotkeys()
         self._auto_timer.stop()
         text = self._text_edit.toPlainText().strip()
         if not text:
@@ -221,9 +249,20 @@ class PreviewPopup(QWidget):
         self.hide()
 
     def _on_cancel(self):
+        if not self.isVisible():
+            return
+        self._waiting = False
+        self._unregister_hotkeys()
         self._auto_timer.stop()
         self.cancel_requested.emit()
         self.hide()
+
+    def hideEvent(self, event):
+        """Гарантировать снятие хуков при скрытии popup."""
+        self._unregister_hotkeys()
+        super().hideEvent(event)
+
+    # ── Re-dictate support ───────────────────────────────────
 
     def stop_timer(self):
         """Остановить таймер и скрыть progress bar."""
@@ -232,6 +271,8 @@ class PreviewPopup(QWidget):
 
     def restart_timer(self, delay_seconds: int):
         """Перезапустить таймер с новым delay."""
+        self._waiting = False
+        self._editing = False
         self._total_ms = delay_seconds * 1000
         self._remaining_ms = self._total_ms
         self._timer_bar.setValue(PROGRESS_MAX)
@@ -243,6 +284,7 @@ class PreviewPopup(QWidget):
         self._auto_timer.stop()
         self._timer_bar.setVisible(False)
         self._editing = False
+        self._waiting = True
         self._text_edit.setPlainText("Нажмите F9 для записи...")
         self._text_edit.setStyleSheet("QTextEdit { color: #888; }")
         self._btn_redictate.setEnabled(False)
@@ -250,15 +292,7 @@ class PreviewPopup(QWidget):
     def update_text(self, text: str):
         """Обновить текст после re-dictate."""
         self._editing = False
+        self._waiting = False
         self._text_edit.setStyleSheet("")
         self._text_edit.setPlainText(text)
         self._btn_redictate.setEnabled(True)
-
-    def keyPressEvent(self, event):
-        key = event.key()
-        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self._on_insert()
-        elif key == Qt.Key.Key_Escape:
-            self._on_cancel()
-        else:
-            super().keyPressEvent(event)
