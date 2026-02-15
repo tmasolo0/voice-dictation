@@ -32,7 +32,7 @@ class Application:
         self.model_manager = ModelManager(self.bus, config)
         self.audio = AudioCapture(self.bus, config)
         self.recognizer = Recognizer(self.bus, self.model_manager, config)
-        self.pipeline = OutputPipeline(self.bus)
+        self.pipeline = OutputPipeline(self.bus, config)
         self.inserter = TextInserter(self.bus, config)
         self.hotkeys = HotkeyManager(self.bus, config)
         self.history = HistoryManager(self.bus, self.model_manager)
@@ -143,6 +143,10 @@ class Application:
 
     def _on_mode_changed(self, key, value):
         """Централизованная обработка переключения режимов."""
+        if key == "open_settings":
+            self._open_settings()
+            return
+
         if key == "open_model_manager":
             self._open_model_manager()
             return
@@ -168,6 +172,39 @@ class Application:
             dictation_model = config.get('recognition', 'model', default=MODEL_TURBO)
             new_model = MODEL_TRANSLATE if new_value else dictation_model
             self.model_manager.load_model(new_model)
+
+    def _open_settings(self):
+        """Открыть диалог настроек с hot-apply логикой."""
+        from ui.settings_dialog import SettingsDialog
+
+        # Отключить hotkeys на время модального диалога
+        self.hotkeys.set_enabled(False)
+
+        # Снапшот для сравнения
+        old_hotkey = config.get('recognition', 'hotkey', default='f9')
+        old_translate_hotkey = config.get('recognition', 'translate_hotkey', default='f10')
+        old_size = config.get('widget', 'size', default=100)
+
+        dialog = SettingsDialog(config, parent=self.widget)
+        result = dialog.exec()
+
+        # Вернуть hotkeys
+        self.hotkeys.set_enabled(True)
+
+        if result == dialog.DialogCode.Accepted:
+            # Hot-apply: горячие клавиши
+            new_hotkey = config.get('recognition', 'hotkey', default='f9')
+            new_translate_hotkey = config.get('recognition', 'translate_hotkey', default='f10')
+            if new_hotkey != old_hotkey:
+                self.hotkeys.update_hotkey(new_hotkey)
+            if new_translate_hotkey != old_translate_hotkey:
+                self.hotkeys.update_translate_hotkey(new_translate_hotkey)
+
+            # Hot-apply: размер виджета
+            new_size = config.get('widget', 'size', default=100)
+            if new_size != old_size:
+                self.widget.setFixedSize(new_size, new_size)
+                self.widget.update()
 
     def _open_model_manager(self):
         """Открыть диалог управления моделями."""
