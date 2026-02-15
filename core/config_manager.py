@@ -13,7 +13,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 CONFIG_FILE = PROJECT_ROOT / "config.json"
 DICTIONARY_FILE = PROJECT_ROOT / "dictionary.txt"
 DICTIONARIES_DIR = PROJECT_ROOT / "dictionaries"
-CONFIG_VERSION = 6
+CONFIG_VERSION = 7
 
 DEFAULT_CONFIG = {
     "version": CONFIG_VERSION,
@@ -40,6 +40,7 @@ DEFAULT_CONFIG = {
         "suppress_tokens": [-1],                # Подавление не-речевых токенов (-1 = дефолтный набор)
         "hallucination_silence_threshold": 2.0, # Фильтр галлюцинаций на тишине (секунды)
         "translate_hotkey": "f10",
+        "history_hotkey": "ctrl+h",
         "vram_cleanup_interval": 10
     },
     "dictation": {

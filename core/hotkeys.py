@@ -15,6 +15,7 @@ class HotkeyManager:
         self._enabled = True
         self._hotkey = config.get('recognition', 'hotkey', default='f9')
         self._translate_hotkey = config.get('recognition', 'translate_hotkey', default='f10')
+        self._history_hotkey = config.get('recognition', 'history_hotkey', default='ctrl+h')
 
     def start(self):
         """Запустить слушатель клавиатуры в фоновом потоке."""
@@ -40,12 +41,25 @@ class HotkeyManager:
         """Обновить горячую клавишу перевода без перезапуска."""
         self._translate_hotkey = hotkey
 
+    def update_history_hotkey(self, hotkey: str):
+        """Обновить горячую клавишу истории без перезапуска."""
+        self._history_hotkey = hotkey
+
     def _on_key_event(self, event):
         """Обработка нажатий/отпусканий горячих клавиш."""
         # Переключение перевода — одиночное нажатие, работает всегда
         if event.name == self._translate_hotkey and event.event_type == 'down':
             self._bus.mode_changed.emit("translate_toggle", None)
             return
+
+        # History dialog — combo hotkey (e.g. "ctrl+h")
+        if self._history_hotkey and event.event_type == 'down':
+            parts = self._history_hotkey.split('+')
+            base_key = parts[-1].strip()
+            modifiers = [m.strip() for m in parts[:-1]]
+            if event.name == base_key and all(keyboard.is_pressed(mod) for mod in modifiers):
+                self._bus.mode_changed.emit("open_history", None)
+                return
 
         # Push-to-talk
         if event.name != self._hotkey:
