@@ -13,7 +13,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 CONFIG_FILE = PROJECT_ROOT / "config.json"
 DICTIONARY_FILE = PROJECT_ROOT / "dictionary.txt"
 DICTIONARIES_DIR = PROJECT_ROOT / "dictionaries"
-CONFIG_VERSION = 4
+CONFIG_VERSION = 5
 
 DEFAULT_CONFIG = {
     "version": CONFIG_VERSION,
@@ -52,6 +52,10 @@ DEFAULT_CONFIG = {
     },
     "dictionaries": {
         "active": ["it"]
+    },
+    "preview": {
+        "enabled": False,
+        "auto_insert_delay": 5
     },
     "system": {
         "autostart": False,

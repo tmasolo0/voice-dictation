@@ -30,6 +30,10 @@ class EventBus(QObject):
     # Режимы
     mode_changed = pyqtSignal(str, object)    # ключ, значение
 
+    # Preview popup
+    preview_insert = pyqtSignal(str)          # текст для вставки (может быть отредактирован)
+    preview_cancel = pyqtSignal()             # отмена вставки
+
     # Жизненный цикл приложения
     quit_requested = pyqtSignal()
     error_occurred = pyqtSignal(str, str)     # компонент, сообщение
