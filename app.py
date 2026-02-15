@@ -48,6 +48,8 @@ class Application:
         self.preview_popup = PreviewPopup(self.widget)
         self.preview_popup.insert_requested.connect(self._on_preview_insert)
         self.preview_popup.cancel_requested.connect(self._on_preview_cancel)
+        self.preview_popup.redictate_requested.connect(self._on_redictate)
+        self._redictate_mode = False
 
         # State machine wiring
         self.bus.recording_start.connect(lambda _: self.state_machine.transition(AppState.RECORDING))
@@ -96,6 +98,14 @@ class Application:
 
     def _on_text_processed(self, text: str):
         """Координация preview popup: показать или вставить мгновенно."""
+        if self._redictate_mode:
+            self._redictate_mode = False
+            auto_delay = config.get('preview', 'auto_insert_delay', default=5)
+            self.preview_popup.update_text(text)
+            if auto_delay > 0:
+                self.preview_popup.restart_timer(auto_delay)
+            return
+
         preview_enabled = config.get('preview', 'enabled', default=False)
         auto_delay = config.get('preview', 'auto_insert_delay', default=5)
 
@@ -107,10 +117,19 @@ class Application:
 
     def _on_preview_insert(self, text: str):
         """Вставка текста из preview popup (возможно отредактированного)."""
+        self._redictate_mode = False
         self.inserter._on_text_ready(text)
 
     def _on_preview_cancel(self):
         """Отмена вставки из preview popup."""
+        self._redictate_mode = False
+        self.state_machine.transition(AppState.READY)
+
+    def _on_redictate(self):
+        """Re-dictate: остановить таймер, перейти в режим ожидания записи."""
+        self._redictate_mode = True
+        self.preview_popup.stop_timer()
+        self.preview_popup.set_waiting_state()
         self.state_machine.transition(AppState.READY)
 
     def _on_text_recognized(self, text, metadata):

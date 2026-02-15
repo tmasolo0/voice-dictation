@@ -225,15 +225,34 @@ class PreviewPopup(QWidget):
         self.cancel_requested.emit()
         self.hide()
 
-    def update_text(self, text: str):
-        """Обновить текст (для re-dictate в Plan 02)."""
+    def stop_timer(self):
+        """Остановить таймер и скрыть progress bar."""
+        self._auto_timer.stop()
+        self._timer_bar.setVisible(False)
+
+    def restart_timer(self, delay_seconds: int):
+        """Перезапустить таймер с новым delay."""
+        self._total_ms = delay_seconds * 1000
+        self._remaining_ms = self._total_ms
+        self._timer_bar.setValue(PROGRESS_MAX)
+        self._timer_bar.setVisible(True)
+        self._auto_timer.start()
+
+    def set_waiting_state(self):
+        """Показать состояние ожидания записи (re-dictate)."""
+        self._auto_timer.stop()
+        self._timer_bar.setVisible(False)
         self._editing = False
+        self._text_edit.setPlainText("Нажмите F9 для записи...")
+        self._text_edit.setStyleSheet("QTextEdit { color: #888; }")
+        self._btn_redictate.setEnabled(False)
+
+    def update_text(self, text: str):
+        """Обновить текст после re-dictate."""
+        self._editing = False
+        self._text_edit.setStyleSheet("")
         self._text_edit.setPlainText(text)
-        if self._total_ms > 0:
-            self._remaining_ms = self._total_ms
-            self._timer_bar.setValue(PROGRESS_MAX)
-            self._timer_bar.setVisible(True)
-            self._auto_timer.start()
+        self._btn_redictate.setEnabled(True)
 
     def keyPressEvent(self, event):
         key = event.key()
