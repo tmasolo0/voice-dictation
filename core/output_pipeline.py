@@ -78,8 +78,9 @@ class TrailingDotProcessor(TextProcessor):
 class OutputPipeline:
     """Пропускает текст через цепочку TextProcessor и отправляет результат."""
 
-    def __init__(self, event_bus):
+    def __init__(self, event_bus, config):
         self._bus = event_bus
+        self._config = config
         self._processors: list[TextProcessor] = [
             StripProcessor(),
             PunctuationProcessor(),
@@ -95,7 +96,15 @@ class OutputPipeline:
 
     def _on_text_recognized(self, text: str, metadata: dict):
         """Обработка распознанного текста через цепочку процессоров."""
-        for proc in self._processors:
+        processors = [StripProcessor()]
+        if self._config.get('postprocessing', 'punctuation', default=True):
+            processors.append(PunctuationProcessor())
+        if self._config.get('postprocessing', 'capitalization', default=True):
+            processors.append(CapitalizationProcessor())
+        if self._config.get('postprocessing', 'trailing_dot', default=True):
+            processors.append(TrailingDotProcessor())
+
+        for proc in processors:
             text = proc.process(text, metadata)
 
         if text:
