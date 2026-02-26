@@ -5,6 +5,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -13,18 +14,27 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
+    QProgressBar,
+    QPushButton,
     QSlider,
     QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from core.config_manager import ConfigManager, DEFAULT_CONFIG, DICTIONARIES_DIR
-from core.model_catalog import MODEL_LABELS, get_local_models
+from core.model_catalog import (
+    MODEL_CATALOG, MODEL_LABELS, MODELS_DIR, ALLOW_PATTERNS,
+    get_local_models, is_model_downloaded,
+)
+from ui.model_dialog import ModelDownloadThread
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +164,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self._config = config
         self._changed_settings: dict = {}
+        self._download_thread = None
 
         self.setWindowTitle("Настройки")
         self.setMinimumSize(550, 500)
@@ -182,6 +193,7 @@ class SettingsDialog(QDialog):
         self._build_tab_widget()
         self._build_tab_postprocessing()
         self._build_tab_dictionary()
+        self._build_tab_models()
 
         # Button box
         self._btn_box = QDialogButtonBox(
@@ -446,6 +458,111 @@ class SettingsDialog(QDialog):
         layout.addStretch()
         self._tabs.addTab(tab, "Словари")
 
+    # -- Tab 6: Models ----------------------------------------------------
+
+    def _build_tab_models(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        self._models_table = QTableWidget()
+        self._models_table.setColumnCount(4)
+        self._models_table.setHorizontalHeaderLabels(["Модель", "Размер", "Статус", ""])
+        self._models_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._models_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        header = self._models_table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._models_table.verticalHeader().hide()
+        layout.addWidget(self._models_table)
+
+        self._model_progress = QProgressBar()
+        self._model_progress.hide()
+        layout.addWidget(self._model_progress)
+
+        self._model_status = QLabel("")
+        layout.addWidget(self._model_status)
+
+        self._tabs.addTab(tab, "Модели")
+        self._populate_models_table()
+
+    def _populate_models_table(self):
+        active_model = self._config.get("recognition", "model", default="large-v3-turbo")
+        models = list(MODEL_CATALOG.items())
+        self._models_table.setRowCount(len(models))
+
+        for row, (name, info) in enumerate(models):
+            downloaded = is_model_downloaded(name)
+            is_active = downloaded and (name == active_model)
+
+            self._models_table.setItem(row, 0, QTableWidgetItem(f"{name}\n{info['description']}"))
+            self._models_table.setItem(row, 1, QTableWidgetItem(f"{info['size_gb']:.1f} GB"))
+
+            if is_active:
+                status = "Активна"
+            elif downloaded:
+                status = "Установлена"
+            elif not info["downloadable"]:
+                status = "Ручная установка"
+            else:
+                status = "Не скачана"
+            self._models_table.setItem(row, 2, QTableWidgetItem(status))
+
+            btn = QPushButton()
+            if is_active:
+                btn.setText("Активна")
+                btn.setEnabled(False)
+            elif downloaded:
+                btn.setText("Выбрать")
+                btn.clicked.connect(lambda checked, n=name: self._on_model_select(n))
+            elif info["downloadable"]:
+                btn.setText("Скачать")
+                btn.clicked.connect(lambda checked, n=name: self._on_model_download(n))
+            else:
+                btn.setText("—")
+                btn.setEnabled(False)
+            self._models_table.setCellWidget(row, 3, btn)
+
+        self._models_table.resizeRowsToContents()
+
+    def _on_model_select(self, model_name):
+        self._config.set("recognition", "model", model_name)
+        self._config.save()
+        self._populate_models_table()
+        self._model_status.setText("Перезапустите приложение для смены модели")
+
+    def _on_model_download(self, model_name):
+        if self._download_thread is not None and self._download_thread.isRunning():
+            QMessageBox.warning(self, "Скачивание", "Дождитесь завершения текущего скачивания")
+            return
+
+        info = MODEL_CATALOG[model_name]
+        self._download_thread = ModelDownloadThread(
+            info["repo_id"], MODELS_DIR / model_name, model_name,
+        )
+        self._download_thread.progress.connect(self._on_model_download_progress)
+        self._download_thread.finished_ok.connect(self._on_model_download_finished)
+        self._download_thread.error.connect(self._on_model_download_error)
+
+        self._model_progress.setValue(0)
+        self._model_progress.show()
+        self._model_status.setText(f"Скачивание {model_name}...")
+        self._download_thread.start()
+
+    def _on_model_download_progress(self, current, total):
+        self._model_progress.setMaximum(total)
+        self._model_progress.setValue(current)
+
+    def _on_model_download_finished(self, model_name):
+        self._model_progress.hide()
+        self._download_thread = None
+        self._model_status.setText(f"Модель {model_name} скачана")
+        self._populate_models_table()
+
+    def _on_model_download_error(self, msg):
+        self._model_progress.hide()
+        self._download_thread = None
+        self._model_status.setText(f"Ошибка: {msg}")
+
     # ======================================================================
     # Load / Collect values
     # ======================================================================
@@ -628,6 +745,18 @@ class SettingsDialog(QDialog):
         self.reject()
 
     def closeEvent(self, event):
+        if self._download_thread is not None and self._download_thread.isRunning():
+            reply = QMessageBox.question(
+                self, "Скачивание",
+                "Скачивание модели в процессе. Прервать?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.No:
+                event.ignore()
+                return
+            self._download_thread.quit()
+            self._download_thread.wait(3000)
+            self._download_thread = None
         if self._has_unsaved_changes():
             reply = QMessageBox.question(
                 self,

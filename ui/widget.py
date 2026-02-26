@@ -304,9 +304,6 @@ class DictationWidget(QWidget):
         """Контекстное меню — сигналы вместо прямых вызовов."""
         menu = QMenu(self)
 
-        models_action = menu.addAction("Управление моделями...")
-        models_action.triggered.connect(lambda: self._bus.mode_changed.emit("open_model_manager", None))
-
         settings_action = menu.addAction("Настройки...")
         settings_action.triggered.connect(lambda: self._bus.mode_changed.emit("open_settings", None))
 

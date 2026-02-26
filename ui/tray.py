@@ -61,9 +61,6 @@ class TrayManager:
         """Пересоздание контекстного меню трея."""
         tray_menu = QMenu()
 
-        models_action = tray_menu.addAction("Управление моделями...")
-        models_action.triggered.connect(lambda: self._bus.mode_changed.emit("open_model_manager", None))
-
         settings_action = tray_menu.addAction("Настройки...")
         settings_action.triggered.connect(lambda: self._bus.mode_changed.emit("open_settings", None))
 

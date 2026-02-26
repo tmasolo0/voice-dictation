@@ -151,10 +151,6 @@ class Application:
             self._open_settings()
             return
 
-        if key == "open_model_manager":
-            self._open_model_manager()
-            return
-
         if key == "hotkey_changed":
             self.hotkeys.update_hotkey(value)
             config.set('recognition', 'hotkey', value)
@@ -224,12 +220,6 @@ class Application:
             if new_size != old_size:
                 self.widget.setFixedSize(new_size, new_size)
                 self.widget.update()
-
-    def _open_model_manager(self):
-        """Открыть диалог управления моделями."""
-        from ui.model_dialog import ModelManagerDialog
-        dialog = ModelManagerDialog(config, event_bus=self.bus, parent=self.widget)
-        dialog.exec()
 
     def _shutdown(self):
         """Корректное завершение."""
