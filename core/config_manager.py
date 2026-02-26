@@ -13,7 +13,8 @@ PROJECT_ROOT = Path(__file__).parent.parent
 CONFIG_FILE = PROJECT_ROOT / "config.json"
 DICTIONARY_FILE = PROJECT_ROOT / "dictionary.txt"
 DICTIONARIES_DIR = PROJECT_ROOT / "dictionaries"
-CONFIG_VERSION = 7
+REPLACEMENTS_FILE = PROJECT_ROOT / "replacements.json"
+CONFIG_VERSION = 8
 
 DEFAULT_CONFIG = {
     "version": CONFIG_VERSION,
@@ -28,6 +29,8 @@ DEFAULT_CONFIG = {
         "device": "cuda",
         "compute_type": "float16",
         "language": "auto",
+        "initial_prompt": "",                    # Контекст для декодера (короткая фраза, НЕ список терминов)
+        "use_hotwords": True,                    # Использовать hotwords из словарей (может вызывать галлюцинации)
         # --- Параметры качества транскрипции ---
         "beam_size": 5,                         # Ширина beam search (больше = точнее, медленнее)
         "temperature": 0.3,                     # Температура сэмплирования (0 = жадный декодинг)
@@ -213,6 +216,17 @@ class ConfigManager:
                 print(f"Доменный словарь не найден: {domain_file}")
 
         return " ".join(sorted(terms)) if terms else ""
+
+    def get_replacements(self) -> dict:
+        """Загрузка словаря замен из replacements.json."""
+        if not REPLACEMENTS_FILE.exists():
+            return {}
+        try:
+            with open(REPLACEMENTS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Ошибка чтения replacements.json: {e}")
+            return {}
 
     def reload(self):
         """Перезагрузка конфигурации из файла."""

@@ -1,6 +1,7 @@
 """Recognizer — распознавание речи через Whisper."""
 
 import gc
+import re
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -19,6 +20,7 @@ class Recognizer:
         self._transcription_count = 0
         self._vram_cleanup_interval = config.get('recognition', 'vram_cleanup_interval', default=10)
 
+        self._replacements = self._config.get_replacements()
         self._bus.audio_ready.connect(self._on_audio_ready)
 
     def _on_audio_ready(self, audio_data):
@@ -41,13 +43,19 @@ class Recognizer:
             start = time.time()
             translate_mode = self._config.get('dictation', 'translate_to_english', default=False)
             beam_size = self._config.get('recognition', 'beam_size', default=5)
-            hotwords = self._config.get_hotwords()
+            use_hotwords = self._config.get('recognition', 'use_hotwords', default=True)
+            hotwords = self._config.get_hotwords() if use_hotwords else ""
+
+            language = self._config.get('recognition', 'language', default=None) or None
+            initial_prompt = self._config.get('recognition', 'initial_prompt', default='') or None
 
             if translate_mode:
                 segments, info = model.transcribe(
                     audio_data,
+                    language=language,
                     task="translate",
                     vad_filter=True,
+                    initial_prompt=initial_prompt,
                     hotwords=hotwords or None,
                     condition_on_previous_text=self._config.get('recognition', 'condition_on_previous_text', default=False),
                     beam_size=beam_size,
@@ -59,7 +67,9 @@ class Recognizer:
             else:
                 segments, info = model.transcribe(
                     audio_data,
+                    language=language,
                     vad_filter=True,
+                    initial_prompt=initial_prompt,
                     hotwords=hotwords or None,
                     condition_on_previous_text=self._config.get('recognition', 'condition_on_previous_text', default=False),
                     beam_size=beam_size,
@@ -74,6 +84,7 @@ class Recognizer:
                 )
 
             text = "".join([s.text for s in segments]).strip()
+            text = self._apply_replacements(text)
             elapsed = time.time() - start
 
             metadata = {
@@ -103,6 +114,19 @@ class Recognizer:
         finally:
             with self._busy_lock:
                 self._busy = False
+
+    def _apply_replacements(self, text):
+        """Пост-обработка: замена часто неверно распознанных терминов."""
+        if not self._replacements:
+            return text
+        for wrong, correct in self._replacements.items():
+            pattern = r'\b' + re.escape(wrong) + r'\b'
+            text = re.sub(pattern, correct, text, flags=re.IGNORECASE)
+        return text
+
+    def reload_replacements(self):
+        """Перезагрузка словаря замен из файла."""
+        self._replacements = self._config.get_replacements()
 
     def _cleanup_vram(self):
         """Периодическая очистка VRAM для предотвращения утечек."""

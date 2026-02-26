@@ -54,7 +54,7 @@ class AudioCapture:
         self._recording_event.set()
 
     def _on_stop(self):
-        """Конец записи — собрать данные и отправить."""
+        """Конец записи — собрать данные, обрезать тишину, нормализовать."""
         self._recording_event.clear()
         with self._lock:
             data = list(self._audio_data)
@@ -62,4 +62,25 @@ class AudioCapture:
 
         if data:
             audio_np = np.concatenate(data, axis=0).flatten()
+            audio_np = self._trim_silence(audio_np)
+            if len(audio_np) < SAMPLE_RATE * 0.1:
+                return
+            audio_np = self._normalize(audio_np)
             self._bus.audio_ready.emit(audio_np)
+
+    def _trim_silence(self, audio, threshold=0.01, margin_samples=1600):
+        """Обрезать тишину в начале и конце аудио."""
+        amplitude = np.abs(audio)
+        above = np.where(amplitude > threshold)[0]
+        if len(above) == 0:
+            return audio[:0]
+        start = max(0, above[0] - margin_samples)
+        end = min(len(audio), above[-1] + margin_samples)
+        return audio[start:end]
+
+    def _normalize(self, audio, target_peak=0.8):
+        """Нормализовать громкость до target_peak."""
+        peak = np.max(np.abs(audio))
+        if peak < 0.001:
+            return audio
+        return audio * (target_peak / peak)
