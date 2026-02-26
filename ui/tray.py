@@ -23,7 +23,8 @@ class TrayManager:
         self.dictation_model = config.get('recognition', 'model', default='large-v3-turbo')
 
         self._tray_icon.setIcon(self._create_tray_icon("ready"))
-        self._tray_icon.setToolTip("Voice Dictation")
+        from app import get_version
+        self._tray_icon.setToolTip(f"Voice Dictation v{get_version()}")
         self._tray_icon.activated.connect(self._on_tray_activated)
 
         self._rebuild_menu()

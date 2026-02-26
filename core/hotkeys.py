@@ -51,11 +51,6 @@ class HotkeyManager:
 
     def _on_key_event(self, event):
         """Обработка нажатий/отпусканий горячих клавиш."""
-        # DEBUG: логируем только hotkey-события
-        if event.name in (self._hotkey, self._translate_hotkey):
-            log.info("key_event: name=%s type=%s enabled=%s recording=%s",
-                     event.name, event.event_type, self._enabled, self._recording)
-
         # Переключение перевода — одиночное нажатие, работает всегда
         if event.name == self._translate_hotkey and event.event_type == 'down':
             self._bus.mode_changed.emit("translate_toggle", None)

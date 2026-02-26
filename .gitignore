@@ -37,6 +37,6 @@ logs/
 # Build artifacts
 dist/
 build/__pycache__/
-*.spec
+build/VoiceDictation/
 assets/icon.ico
 installer_output/

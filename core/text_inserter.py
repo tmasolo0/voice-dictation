@@ -1,9 +1,12 @@
 """TextInserter — вставка текста в активное окно."""
 
+import logging
 import time
 import win32gui
 import pyperclip
 import pyautogui
+
+log = logging.getLogger(__name__)
 
 
 class TextInserter:
@@ -42,7 +45,7 @@ class TextInserter:
             self._bus.text_inserted.emit()
 
         except Exception as e:
-            print(f"Ошибка вставки: {e}")
+            log.exception("Ошибка вставки: %s", e)
             self._bus.error_occurred.emit("TextInserter", str(e))
         finally:
             # Восстанавливаем clipboard после вставки

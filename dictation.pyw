@@ -19,7 +19,7 @@ def setup_logging():
     log_file = log_dir / "dictation.log"
 
     logging.basicConfig(
-        level=logging.DEBUG if getattr(sys, 'frozen', False) else logging.ERROR,
+        level=logging.INFO if getattr(sys, 'frozen', False) else logging.DEBUG,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[logging.FileHandler(log_file, encoding='utf-8')]
     )

@@ -1,8 +1,28 @@
 """Application — координатор компонентов Voice Dictation."""
 
+import logging
+import sys
+from pathlib import Path
+
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from core.config_manager import config
+
+log = logging.getLogger(__name__)
+
+
+def get_version() -> str:
+    """Прочитать версию из файла VERSION."""
+    if getattr(sys, 'frozen', False):
+        base = Path(sys._MEIPASS)
+    else:
+        base = Path(__file__).parent
+    version_file = base / 'VERSION'
+    if version_file.exists():
+        return version_file.read_text(encoding='utf-8').strip()
+    return 'dev'
+
+
 from core.event_bus import EventBus
 from core.app_state import AppState, AppStateMachine
 from core.audio_capture import AudioCapture
@@ -88,18 +108,17 @@ class Application:
         self.widget.show()
 
         # Startup info
+        version = get_version()
         hotkey = config.get('recognition', 'hotkey', default='f9')
         translate_hotkey = config.get('recognition', 'translate_hotkey', default='f10')
         dictation_model = config.get('recognition', 'model', default=MODEL_TURBO)
-        print("=" * 40)
-        print("Voice Dictation")
-        print("=" * 40)
-        print(f"Запись: {hotkey.upper()}")
-        print(f"Перевод: {translate_hotkey.upper()}")
-        print(f"Модель: {dictation_model}")
-        print(f"Режим: {'EN (перевод)' if translate_mode else 'RU/EN (авто)'}")
-        print("ПКМ -> модель / перевод")
-        print("=" * 40)
+        banner = (
+            f"Voice Dictation v{version} | "
+            f"Запись: {hotkey.upper()} | Перевод: {translate_hotkey.upper()} | "
+            f"Модель: {dictation_model} | "
+            f"Режим: {'EN (перевод)' if translate_mode else 'RU/EN (авто)'}"
+        )
+        log.info(banner)
 
     def _on_text_processed(self, text: str):
         """Координация preview popup: показать или вставить мгновенно."""

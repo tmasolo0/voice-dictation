@@ -139,7 +139,7 @@ class Recognizer:
             import torch
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-                print(f"VRAM cleanup после {self._transcription_count} транскрипций")
+                log.debug("VRAM cleanup после %d транскрипций", self._transcription_count)
         except ImportError:
             pass
 

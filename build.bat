@@ -3,9 +3,10 @@ chcp 65001 >nul
 setlocal
 
 set PYTHON=python311\python.exe
+set /p VERSION=<VERSION
 
 echo ============================================
-echo  Voice Dictation — Build
+echo  Voice Dictation v%VERSION% — Build
 echo ============================================
 
 :: Проверка Python
@@ -34,7 +35,7 @@ if not exist "assets\icon.ico" (
     )
 )
 
-:: Сборка
+:: ===== Этап 1: PyInstaller =====
 echo [INFO] Запуск PyInstaller...
 %PYTHON% -m PyInstaller VoiceDictation.spec --noconfirm
 if errorlevel 1 (
@@ -63,7 +64,36 @@ if not exist "dist\VoiceDictation\_internal\dictionaries" (
 
 echo.
 echo ============================================
-echo  Сборка завершена!
-echo  dist\VoiceDictation\VoiceDictation.exe
+echo  EXE собран: dist\VoiceDictation\VoiceDictation.exe
 echo ============================================
+
+:: ===== Этап 2: Inno Setup installer =====
+set ISCC=
+where iscc >nul 2>nul
+if not errorlevel 1 (
+    set ISCC=iscc
+) else if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" (
+    set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
+) else if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" (
+    set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
+)
+
+if defined ISCC (
+    echo [INFO] Компиляция инсталлера...
+    "%ISCC%" installer.iss
+    if errorlevel 1 (
+        echo [ERROR] Inno Setup: компиляция не удалась
+        exit /b 1
+    )
+    echo.
+    echo ============================================
+    echo  Инсталлер: installer_output\VoiceDictation_Setup_%VERSION%.exe
+    echo ============================================
+) else (
+    echo [WARN] Inno Setup не найден — пропускаем создание инсталлера
+    echo        Установите Inno Setup 6: https://jrsoftware.org/isinfo.php
+)
+
+echo.
+echo Готово!
 pause

@@ -1,6 +1,9 @@
 """AppState — состояния приложения и машина переходов."""
 
+import logging
 from enum import Enum, auto
+
+log = logging.getLogger(__name__)
 
 
 class AppState(Enum):
@@ -40,5 +43,5 @@ class AppStateMachine:
             self._state = new_state
             self._bus.state_changed.emit(new_state.name.lower())
             return True
-        print(f"Invalid transition: {self._state.name} -> {new_state.name}")
+        log.warning("Invalid transition: %s -> %s", self._state.name, new_state.name)
         return False

@@ -63,7 +63,7 @@ class ModelManager:
 
             local_path = MODELS_DIR / model_name
             model_path = str(local_path) if local_path.exists() else model_name
-            log.info("model_path=%s exists=%s", model_path, local_path.exists())
+            log.debug("model_path=%s exists=%s", model_path, local_path.exists())
 
             free_before = self._get_free_vram() if device == 'cuda' else None
 

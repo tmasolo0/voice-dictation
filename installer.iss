@@ -13,6 +13,7 @@ AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={localappdata}\VoiceDictation
 DefaultGroupName={#MyAppName}
+DisableDirPage=no
 DisableProgramGroupPage=yes
 OutputDir=installer_output
 OutputBaseFilename=VoiceDictation_Setup_{#MyAppVersion}
@@ -46,3 +47,20 @@ Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: 
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Запустить {#MyAppName}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+function VCRedistInstalled: Boolean;
+begin
+  Result := FileExists(ExpandConstant('{sys}\vcruntime140.dll'));
+end;
+
+function InitializeSetup: Boolean;
+begin
+  Result := True;
+  if not VCRedistInstalled then
+  begin
+    MsgBox('Microsoft Visual C++ Redistributable не найден.'#13#10#13#10 +
+           'Приложение может не запуститься без него.'#13#10 +
+           'Скачайте VC++ Redistributable с сайта Microsoft.', mbInformation, MB_OK);
+  end;
+end;
