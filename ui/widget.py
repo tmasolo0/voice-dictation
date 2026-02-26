@@ -9,7 +9,6 @@ from PyQt6.QtWidgets import QApplication, QWidget, QMenu
 from PyQt6.QtCore import Qt, QPoint, QTimer
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen
 
-from core.model_catalog import MODEL_LABELS
 
 
 # Цвета состояний
@@ -259,10 +258,10 @@ class DictationWidget(QWidget):
                     painter.setFont(font)
                     painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "EN")
             else:
-                label = MODEL_LABELS.get(self.dictation_model, self.dictation_model)
+                label = self.dictation_model
                 if has_vram:
                     # Модель + VRAM — две строки
-                    font.setPointSize(int(size * 0.10))
+                    font.setPointSize(int(size * 0.07))
                     painter.setFont(font)
                     upper = self.rect().adjusted(0, -int(size * 0.08), 0, 0)
                     painter.drawText(upper, Qt.AlignmentFlag.AlignCenter, label)
@@ -275,7 +274,7 @@ class DictationWidget(QWidget):
                     painter.drawText(lower, Qt.AlignmentFlag.AlignCenter, vram_text)
                 else:
                     # Только метка модели
-                    font.setPointSize(int(size * 0.11))
+                    font.setPointSize(int(size * 0.07))
                     painter.setFont(font)
                     painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, label)
 

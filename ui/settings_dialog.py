@@ -235,6 +235,29 @@ class SettingsDialog(QDialog):
         delay_layout.addStretch()
         form.addRow("Задержка авто-вставки:", delay_layout)
 
+        self._audio_gain_spin = QDoubleSpinBox()
+        self._audio_gain_spin.setRange(0.1, 5.0)
+        self._audio_gain_spin.setSingleStep(0.1)
+        self._audio_gain_spin.setDecimals(1)
+        gain_layout = QHBoxLayout()
+        gain_layout.addWidget(self._audio_gain_spin)
+        gain_hint = QLabel("1.0 = без усиления")
+        gain_hint.setStyleSheet("color: gray;")
+        gain_layout.addWidget(gain_hint)
+        gain_layout.addStretch()
+        form.addRow("Усиление микрофона:", gain_layout)
+
+        self._retention_days_spin = QSpinBox()
+        self._retention_days_spin.setRange(0, 365)
+        self._retention_days_spin.setSuffix(" дн.")
+        retention_layout = QHBoxLayout()
+        retention_layout.addWidget(self._retention_days_spin)
+        retention_hint = QLabel("0 = без ограничения по времени")
+        retention_hint.setStyleSheet("color: gray;")
+        retention_layout.addWidget(retention_hint)
+        retention_layout.addStretch()
+        form.addRow("Хранение истории:", retention_layout)
+
         self._tabs.addTab(tab, "Основные")
 
     # -- Tab 2: Recognition -----------------------------------------------
@@ -278,57 +301,57 @@ class SettingsDialog(QDialog):
 
         self._beam_size_spin = QSpinBox()
         self._beam_size_spin.setRange(1, 10)
-        qf.addRow("beam_size:", self._beam_size_spin)
+        qf.addRow("Ширина поиска (beam):", self._beam_size_spin)
         qf.addRow("", QLabel("Ширина beam search (больше = точнее, медленнее)"))
 
         self._temperature_spin = QDoubleSpinBox()
         self._temperature_spin.setRange(0.0, 1.0)
         self._temperature_spin.setSingleStep(0.1)
         self._temperature_spin.setDecimals(1)
-        qf.addRow("temperature:", self._temperature_spin)
+        qf.addRow("Температура:", self._temperature_spin)
         qf.addRow("", QLabel("Температура сэмплирования (0 = жадный декодинг)"))
 
         self._condition_prev_check = QCheckBox("Использовать предыдущий сегмент как контекст")
-        qf.addRow("condition_on_previous_text:", self._condition_prev_check)
+        qf.addRow("", self._condition_prev_check)
 
         self._compression_spin = QDoubleSpinBox()
         self._compression_spin.setRange(1.0, 5.0)
         self._compression_spin.setSingleStep(0.1)
         self._compression_spin.setDecimals(1)
-        qf.addRow("compression_ratio_threshold:", self._compression_spin)
+        qf.addRow("Порог сжатия:", self._compression_spin)
         qf.addRow("", QLabel("Порог сжатия — фильтр повторяющегося текста"))
 
         self._log_prob_spin = QDoubleSpinBox()
         self._log_prob_spin.setRange(-5.0, 0.0)
         self._log_prob_spin.setSingleStep(0.1)
         self._log_prob_spin.setDecimals(1)
-        qf.addRow("log_prob_threshold:", self._log_prob_spin)
+        qf.addRow("Порог вероятности:", self._log_prob_spin)
         qf.addRow("", QLabel("Порог вероятности — фильтр низкой уверенности"))
 
         self._no_speech_spin = QDoubleSpinBox()
         self._no_speech_spin.setRange(0.0, 1.0)
         self._no_speech_spin.setSingleStep(0.1)
         self._no_speech_spin.setDecimals(1)
-        qf.addRow("no_speech_threshold:", self._no_speech_spin)
+        qf.addRow("Порог тишины:", self._no_speech_spin)
         qf.addRow("", QLabel("Порог тишины — пропуск тихих сегментов"))
 
         self._repetition_spin = QDoubleSpinBox()
         self._repetition_spin.setRange(1.0, 3.0)
         self._repetition_spin.setSingleStep(0.1)
         self._repetition_spin.setDecimals(1)
-        qf.addRow("repetition_penalty:", self._repetition_spin)
+        qf.addRow("Штраф повтора:", self._repetition_spin)
         qf.addRow("", QLabel("Штраф за повторение (>1.0 = штраф)"))
 
         self._no_repeat_ngram_spin = QSpinBox()
         self._no_repeat_ngram_spin.setRange(0, 10)
-        qf.addRow("no_repeat_ngram_size:", self._no_repeat_ngram_spin)
+        qf.addRow("Размер N-грамм:", self._no_repeat_ngram_spin)
         qf.addRow("", QLabel("Запрет повтора N-грамм подряд"))
 
         self._hallucination_spin = QDoubleSpinBox()
         self._hallucination_spin.setRange(0.0, 10.0)
         self._hallucination_spin.setSingleStep(0.5)
         self._hallucination_spin.setDecimals(1)
-        qf.addRow("hallucination_silence_threshold:", self._hallucination_spin)
+        qf.addRow("Фильтр галлюцинаций:", self._hallucination_spin)
         qf.addRow("", QLabel("Фильтр галлюцинаций на тишине (секунды)"))
 
         outer.addWidget(quality_group)
@@ -341,17 +364,17 @@ class SettingsDialog(QDialog):
         self._vad_threshold_spin.setRange(0.0, 1.0)
         self._vad_threshold_spin.setSingleStep(0.05)
         self._vad_threshold_spin.setDecimals(2)
-        vf.addRow("threshold:", self._vad_threshold_spin)
+        vf.addRow("Чувствительность:", self._vad_threshold_spin)
 
         self._vad_min_speech_spin = QSpinBox()
         self._vad_min_speech_spin.setRange(50, 2000)
         self._vad_min_speech_spin.setSuffix(" мс")
-        vf.addRow("min_speech_ms:", self._vad_min_speech_spin)
+        vf.addRow("Мин. длина речи:", self._vad_min_speech_spin)
 
         self._vad_min_silence_spin = QSpinBox()
         self._vad_min_silence_spin.setRange(100, 3000)
         self._vad_min_silence_spin.setSuffix(" мс")
-        vf.addRow("min_silence_ms:", self._vad_min_silence_spin)
+        vf.addRow("Мин. длина паузы:", self._vad_min_silence_spin)
 
         outer.addWidget(vad_group)
         outer.addStretch()
@@ -444,6 +467,8 @@ class SettingsDialog(QDialog):
         self._start_minimized_check.setChecked(c.get("system", "start_minimized", default=False))
         self._preview_enabled_check.setChecked(c.get("preview", "enabled", default=False))
         self._auto_insert_delay_spin.setValue(c.get("preview", "auto_insert_delay", default=5))
+        self._audio_gain_spin.setValue(c.get("recognition", "audio_gain", default=1.0))
+        self._retention_days_spin.setValue(c.get("history", "history_retention_days", default=30))
 
         # Recognition
         model = c.get("recognition", "model", default="large-v3-turbo")
@@ -501,6 +526,8 @@ class SettingsDialog(QDialog):
         vals["system.start_minimized"] = self._start_minimized_check.isChecked()
         vals["preview.enabled"] = self._preview_enabled_check.isChecked()
         vals["preview.auto_insert_delay"] = self._auto_insert_delay_spin.value()
+        vals["recognition.audio_gain"] = self._audio_gain_spin.value()
+        vals["history.history_retention_days"] = self._retention_days_spin.value()
 
         # Recognition
         vals["recognition.model"] = self._model_combo.currentData()
@@ -646,6 +673,8 @@ class SettingsDialog(QDialog):
         self._start_minimized_check.setChecked(d["system"]["start_minimized"])
         self._preview_enabled_check.setChecked(d["preview"]["enabled"])
         self._auto_insert_delay_spin.setValue(d["preview"]["auto_insert_delay"])
+        self._audio_gain_spin.setValue(d["recognition"]["audio_gain"])
+        self._retention_days_spin.setValue(d["history"]["history_retention_days"])
 
     def _reset_recognition(self, d: dict):
         model = d["recognition"]["model"]
