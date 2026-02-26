@@ -22,6 +22,14 @@ models/*
 # User config (created automatically on first run)
 config.json
 
+# Runtime database
+history.db*
+
+# User replacements dictionary
+replacements.json
+
+# Pytest cache
+.pytest_cache/
+
 # Error logs
 logs/
-
