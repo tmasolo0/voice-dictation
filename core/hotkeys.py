@@ -1,8 +1,11 @@
 """HotkeyManager — глобальные горячие клавиши."""
 
+import logging
 import threading
 import keyboard
 import win32gui
+
+log = logging.getLogger(__name__)
 
 
 class HotkeyManager:
@@ -20,6 +23,7 @@ class HotkeyManager:
     def start(self):
         """Запустить слушатель клавиатуры в фоновом потоке."""
         def listener():
+            log.info("keyboard hook started, hotkey=%s", self._hotkey)
             keyboard.hook(self._on_key_event)
             keyboard.wait()
 
@@ -47,6 +51,11 @@ class HotkeyManager:
 
     def _on_key_event(self, event):
         """Обработка нажатий/отпусканий горячих клавиш."""
+        # DEBUG: логируем только hotkey-события
+        if event.name in (self._hotkey, self._translate_hotkey):
+            log.info("key_event: name=%s type=%s enabled=%s recording=%s",
+                     event.name, event.event_type, self._enabled, self._recording)
+
         # Переключение перевода — одиночное нажатие, работает всегда
         if event.name == self._translate_hotkey and event.event_type == 'down':
             self._bus.mode_changed.emit("translate_toggle", None)
@@ -68,6 +77,7 @@ class HotkeyManager:
         # Отпускание ВСЕГДА останавливает запись (даже если enabled=False из-за смены состояния)
         if event.event_type == 'up' and self._recording:
             self._recording = False
+            log.info("recording_stop")
             self._bus.recording_stop.emit()
             return
 
@@ -77,5 +87,5 @@ class HotkeyManager:
         if event.event_type == 'down' and not self._recording:
             self._recording = True
             hwnd = win32gui.GetForegroundWindow()
+            log.info("recording_start hwnd=%s", hwnd)
             self._bus.recording_start.emit(hwnd)
-            print("Запись...")

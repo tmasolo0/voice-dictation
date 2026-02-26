@@ -1,10 +1,13 @@
 """Recognizer — распознавание речи через Whisper."""
 
 import gc
+import logging
 import re
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
+
+log = logging.getLogger(__name__)
 
 
 class Recognizer:
@@ -25,9 +28,10 @@ class Recognizer:
 
     def _on_audio_ready(self, audio_data):
         """Получены аудиоданные — запустить транскрипцию если не занят."""
+        log.info("audio_ready: len=%d", len(audio_data))
         with self._busy_lock:
             if self._busy:
-                print("Транскрипция уже выполняется — пропускаем")
+                log.warning("Транскрипция уже выполняется — пропускаем")
                 return
             self._busy = True
         self._executor.submit(self._transcribe, audio_data)
@@ -46,7 +50,9 @@ class Recognizer:
             use_hotwords = self._config.get('recognition', 'use_hotwords', default=True)
             hotwords = self._config.get_hotwords() if use_hotwords else ""
 
-            language = self._config.get('recognition', 'language', default=None) or None
+            language = self._config.get('recognition', 'language', default=None)
+            if not language or language == 'auto':
+                language = None
             initial_prompt = self._config.get('recognition', 'initial_prompt', default='') or None
 
             if translate_mode:
@@ -97,9 +103,7 @@ class Recognizer:
             # Очистка ссылок на результаты transcribe
             del segments, info
 
-            if text:
-                mode_info = f"({metadata['language']})→EN" if translate_mode else f"({metadata['language']})"
-                print(f"[{elapsed:.1f}с] {mode_info}: {text}")
+            log.info("[%.1fс] lang=%s text='%s'", elapsed, metadata['language'], text[:100] if text else '')
 
             self._bus.text_recognized.emit(text, metadata)
 
@@ -109,7 +113,7 @@ class Recognizer:
                 self._cleanup_vram()
 
         except Exception as e:
-            print(f"Ошибка распознавания: {e}")
+            log.exception("Ошибка распознавания: %s", e)
             self._bus.error_occurred.emit("Recognizer", str(e))
         finally:
             with self._busy_lock:

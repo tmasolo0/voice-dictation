@@ -1,8 +1,8 @@
 """Каталог моделей Whisper — метаданные, проверка наличия, хелперы."""
 
-from pathlib import Path
+from core.config_manager import APP_DIR
 
-MODELS_DIR = Path(__file__).parent.parent / "models"
+MODELS_DIR = APP_DIR / "models"
 
 MODEL_CATALOG = {
     "large-v3-turbo": {

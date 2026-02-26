@@ -2,13 +2,12 @@
 
 import sqlite3
 from datetime import datetime, timedelta
-from pathlib import Path
 
-from core.config_manager import config
+from core.config_manager import config, APP_DIR
 
 MAX_RECORDS = 50
 
-DB_PATH = Path(__file__).parent.parent / "history.db"
+DB_PATH = APP_DIR / "history.db"
 
 
 class HistoryManager:

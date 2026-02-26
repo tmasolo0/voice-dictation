@@ -1,6 +1,6 @@
 """Application — координатор компонентов Voice Dictation."""
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from core.config_manager import config
 from core.event_bus import EventBus
@@ -72,6 +72,11 @@ class Application:
 
     def start(self):
         """Запуск приложения."""
+        # Проверка наличия моделей
+        from core.model_catalog import get_local_models
+        if not get_local_models():
+            self._prompt_download_models()
+
         # Загрузка модели
         translate_mode = config.get('dictation', 'translate_to_english', default=False)
         model_name = MODEL_TRANSLATE if translate_mode else config.get('recognition', 'model', default=MODEL_TURBO)
@@ -93,7 +98,7 @@ class Application:
         print(f"Перевод: {translate_hotkey.upper()}")
         print(f"Модель: {dictation_model}")
         print(f"Режим: {'EN (перевод)' if translate_mode else 'RU/EN (авто)'}")
-        print("ПКМ → модель / перевод")
+        print("ПКМ -> модель / перевод")
         print("=" * 40)
 
     def _on_text_processed(self, text: str):
@@ -220,6 +225,22 @@ class Application:
             if new_size != old_size:
                 self.widget.setFixedSize(new_size, new_size)
                 self.widget.update()
+
+    def _prompt_download_models(self):
+        """Первый запуск без моделей — предложить скачать."""
+        reply = QMessageBox.information(
+            None,
+            "Voice Dictation",
+            "Модели распознавания не найдены.\n"
+            "Откройте менеджер моделей и скачайте хотя бы одну.",
+            QMessageBox.StandardButton.Ok,
+        )
+        from ui.model_dialog import ModelManagerDialog
+        dialog = ModelManagerDialog(config, event_bus=self.bus)
+        dialog.exec()
+        if dialog.model_selected:
+            config.set('recognition', 'model', dialog.model_selected)
+            config.save()
 
     def _shutdown(self):
         """Корректное завершение."""

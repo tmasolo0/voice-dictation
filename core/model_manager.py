@@ -1,11 +1,14 @@
 """ModelManager — управление моделью Whisper."""
 
+import logging
 import threading
-from pathlib import Path
 from faster_whisper import WhisperModel
 
+log = logging.getLogger(__name__)
 
-MODELS_DIR = Path(__file__).parent.parent / "models"
+from core.config_manager import APP_DIR
+
+MODELS_DIR = APP_DIR / "models"
 
 
 class ModelManager:
@@ -53,13 +56,14 @@ class ModelManager:
     def _do_load(self, model_name: str):
         """Фоновая загрузка модели."""
         try:
-            print(f"Загрузка модели {model_name}...")
+            log.info("Загрузка модели %s...", model_name)
 
             device = self._config.get('recognition', 'device', default='cuda')
             compute_type = self._config.get('recognition', 'compute_type', default='float16')
 
             local_path = MODELS_DIR / model_name
             model_path = str(local_path) if local_path.exists() else model_name
+            log.info("model_path=%s exists=%s", model_path, local_path.exists())
 
             free_before = self._get_free_vram() if device == 'cuda' else None
 
@@ -76,9 +80,9 @@ class ModelManager:
                     vram_mb = max(0, (free_before - free_after)) // (1024 * 1024)
                     self._bus.vram_updated.emit(int(vram_mb))
 
-            print(f"Модель {model_name} загружена ({device})")
+            log.info("Модель %s загружена (%s)", model_name, device)
             self._bus.model_load_finished.emit(model_name)
 
         except Exception as e:
-            print(f"Ошибка загрузки модели: {e}")
+            log.exception("Ошибка загрузки модели: %s", e)
             self._bus.model_load_failed.emit(str(e))

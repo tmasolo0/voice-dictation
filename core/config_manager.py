@@ -3,17 +3,25 @@ ConfigManager — централизованное управление конф
 Singleton-класс для чтения/записи настроек из config.json.
 """
 
+import sys
 from pathlib import Path
 import json
 import copy
 from typing import Any
 
-# Путь к config.json — в корне проекта (parent от core/)
-PROJECT_ROOT = Path(__file__).parent.parent
-CONFIG_FILE = PROJECT_ROOT / "config.json"
-DICTIONARY_FILE = PROJECT_ROOT / "dictionary.txt"
-DICTIONARIES_DIR = PROJECT_ROOT / "dictionaries"
-REPLACEMENTS_FILE = PROJECT_ROOT / "replacements.json"
+# Frozen (PyInstaller): .exe рядом с writable-файлами, _MEIPASS — read-only bundle
+# Dev: всё в корне проекта
+if getattr(sys, 'frozen', False):
+    APP_DIR = Path(sys.executable).parent       # рядом с .exe (writable)
+    BUNDLE_DIR = Path(sys._MEIPASS)             # _internal/ (read-only)
+else:
+    APP_DIR = Path(__file__).parent.parent
+    BUNDLE_DIR = APP_DIR
+
+CONFIG_FILE = APP_DIR / "config.json"
+DICTIONARY_FILE = BUNDLE_DIR / "dictionary.txt"
+DICTIONARIES_DIR = BUNDLE_DIR / "dictionaries"
+REPLACEMENTS_FILE = APP_DIR / "replacements.json"
 CONFIG_VERSION = 9
 
 DEFAULT_CONFIG = {

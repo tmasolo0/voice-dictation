@@ -1,8 +1,11 @@
 """AudioCapture — захват аудио с микрофона."""
 
+import logging
 import threading
 import numpy as np
 import sounddevice as sd
+
+log = logging.getLogger(__name__)
 
 
 SAMPLE_RATE = 16000
@@ -60,6 +63,7 @@ class AudioCapture:
             data = list(self._audio_data)
             self._audio_data = []
 
+        log.info("recording_stop: chunks=%d", len(data))
         if data:
             audio_np = np.concatenate(data, axis=0).flatten()
             gain = self._config.get('recognition', 'audio_gain', default=1.0)
@@ -67,9 +71,13 @@ class AudioCapture:
                 audio_np = audio_np * gain
             audio_np = self._trim_silence(audio_np)
             if len(audio_np) < SAMPLE_RATE * 0.1:
+                log.warning("audio too short after trim: %d samples", len(audio_np))
                 return
             audio_np = self._normalize(audio_np)
+            log.info("audio_ready: samples=%d duration=%.1fs", len(audio_np), len(audio_np) / SAMPLE_RATE)
             self._bus.audio_ready.emit(audio_np)
+        else:
+            log.warning("no audio data recorded")
 
     def _trim_silence(self, audio, threshold=0.01, margin_samples=1600):
         """Обрезать тишину в начале и конце аудио."""
