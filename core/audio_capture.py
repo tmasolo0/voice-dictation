@@ -62,6 +62,9 @@ class AudioCapture:
 
         if data:
             audio_np = np.concatenate(data, axis=0).flatten()
+            gain = self._config.get('recognition', 'audio_gain', default=1.0)
+            if gain != 1.0:
+                audio_np = audio_np * gain
             audio_np = self._trim_silence(audio_np)
             if len(audio_np) < SAMPLE_RATE * 0.1:
                 return

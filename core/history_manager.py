@@ -1,8 +1,10 @@
 """HistoryManager — SQLite-хранилище истории диктовок."""
 
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+
+from core.config_manager import config
 
 MAX_RECORDS = 50
 
@@ -61,6 +63,14 @@ class HistoryManager:
                 "DELETE FROM dictations WHERE id NOT IN (SELECT id FROM dictations ORDER BY timestamp DESC LIMIT ?)",
                 (MAX_RECORDS,),
             )
+            # TTL rotation
+            retention_days = config.get('history', 'history_retention_days', default=30)
+            if retention_days > 0:
+                cutoff = (datetime.now() - timedelta(days=retention_days)).isoformat()
+                self._conn.execute(
+                    "DELETE FROM dictations WHERE timestamp < ?",
+                    (cutoff,),
+                )
 
     def get_all(self):
         cur = self._conn.execute("SELECT * FROM dictations ORDER BY timestamp DESC")

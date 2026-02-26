@@ -14,7 +14,7 @@ CONFIG_FILE = PROJECT_ROOT / "config.json"
 DICTIONARY_FILE = PROJECT_ROOT / "dictionary.txt"
 DICTIONARIES_DIR = PROJECT_ROOT / "dictionaries"
 REPLACEMENTS_FILE = PROJECT_ROOT / "replacements.json"
-CONFIG_VERSION = 8
+CONFIG_VERSION = 9
 
 DEFAULT_CONFIG = {
     "version": CONFIG_VERSION,
@@ -44,7 +44,8 @@ DEFAULT_CONFIG = {
         "hallucination_silence_threshold": 2.0, # Фильтр галлюцинаций на тишине (секунды)
         "translate_hotkey": "f10",
         "history_hotkey": "ctrl+h",
-        "vram_cleanup_interval": 10
+        "vram_cleanup_interval": 10,
+        "audio_gain": 1.0
     },
     "dictation": {
         "translate_to_english": False
@@ -65,6 +66,9 @@ DEFAULT_CONFIG = {
         "punctuation": True,
         "capitalization": True,
         "trailing_dot": True
+    },
+    "history": {
+        "history_retention_days": 30
     },
     "system": {
         "autostart": False,
