@@ -79,15 +79,9 @@ python311\python.exe -m pytest tests/
 ### Запуск сборки
 
 ```bash
-build.bat
+build.bat              # Только exe (быстро)
+build.bat installer    # Exe + инсталлер (долго, ~15 мин)
 ```
-
-Что делает:
-1. Проверяет Python и PyInstaller
-2. Генерирует иконку (если нет)
-3. Собирает exe через PyInstaller (`VoiceDictation.spec`)
-4. Создаёт `models/` и `logs/` в `dist/`
-5. Компилирует инсталлер через Inno Setup (если установлен)
 
 ### Результат
 
@@ -97,7 +91,7 @@ build.bat
 ## Релиз
 
 1. Обновить `VERSION` (и `#define MyAppVersion` в `installer.iss`)
-2. Запустить `build.bat`
+2. Запустить `build.bat installer`
 3. Пройти чеклист тестирования (ниже)
 4. Коммит и тег:
    ```bash

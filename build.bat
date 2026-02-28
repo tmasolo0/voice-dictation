@@ -5,6 +5,10 @@ setlocal
 set PYTHON=python311\python.exe
 set /p VERSION=<VERSION
 
+:: Разбор аргументов: build.bat [installer]
+set BUILD_INSTALLER=0
+if /i "%~1"=="installer" set BUILD_INSTALLER=1
+
 echo ============================================
 echo  Voice Dictation v%VERSION% — Build
 echo ============================================
@@ -35,7 +39,7 @@ if not exist "assets\icon.ico" (
     )
 )
 
-:: ===== Этап 1: PyInstaller =====
+:: ===== PyInstaller =====
 echo [INFO] Запуск PyInstaller...
 %PYTHON% -m PyInstaller VoiceDictation.spec --noconfirm
 if errorlevel 1 (
@@ -43,9 +47,10 @@ if errorlevel 1 (
     exit /b 1
 )
 
-:: Создание папок для runtime-данных
-if not exist "dist\VoiceDictation\models" mkdir "dist\VoiceDictation\models"
-if not exist "dist\VoiceDictation\logs"   mkdir "dist\VoiceDictation\logs"
+:: Создание чистых папок для runtime-данных (убираем симлинки от dev-среды)
+if exist "dist\VoiceDictation\models" rmdir /s /q "dist\VoiceDictation\models"
+mkdir "dist\VoiceDictation\models"
+if not exist "dist\VoiceDictation\logs" mkdir "dist\VoiceDictation\logs"
 
 :: Fallback: копирование dictionary.txt и dictionaries/ если datas не подхватил
 if not exist "dist\VoiceDictation\_internal\dictionary.txt" (
@@ -67,7 +72,9 @@ echo ============================================
 echo  EXE собран: dist\VoiceDictation\VoiceDictation.exe
 echo ============================================
 
-:: ===== Этап 2: Inno Setup installer =====
+:: ===== Inno Setup installer (только с флагом "installer") =====
+if %BUILD_INSTALLER%==0 goto :done
+
 set ISCC=
 where iscc >nul 2>nul
 if not errorlevel 1 (
@@ -90,10 +97,11 @@ if defined ISCC (
     echo  Инсталлер: installer_output\VoiceDictation_Setup_%VERSION%.exe
     echo ============================================
 ) else (
-    echo [WARN] Inno Setup не найден — пропускаем создание инсталлера
+    echo [WARN] Inno Setup не найден
     echo        Установите Inno Setup 6: https://jrsoftware.org/isinfo.php
 )
 
+:done
 echo.
 echo Готово!
 pause
