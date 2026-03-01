@@ -60,16 +60,16 @@ _QT_KEY_MAP = {
     Qt.Key.Key_6: "6", Qt.Key.Key_7: "7", Qt.Key.Key_8: "8",
     Qt.Key.Key_9: "9",
     Qt.Key.Key_Space: "space", Qt.Key.Key_Return: "enter",
-    Qt.Key.Key_Enter: "enter", Qt.Key.Key_Escape: "esc",
+    Qt.Key.Key_Enter: "enter", Qt.Key.Key_Escape: "escape",
     Qt.Key.Key_Tab: "tab", Qt.Key.Key_Backspace: "backspace",
     Qt.Key.Key_Delete: "delete", Qt.Key.Key_Insert: "insert",
     Qt.Key.Key_Home: "home", Qt.Key.Key_End: "end",
-    Qt.Key.Key_PageUp: "page up", Qt.Key.Key_PageDown: "page down",
+    Qt.Key.Key_PageUp: "pageup", Qt.Key.Key_PageDown: "pagedown",
     Qt.Key.Key_Up: "up", Qt.Key.Key_Down: "down",
     Qt.Key.Key_Left: "left", Qt.Key.Key_Right: "right",
-    Qt.Key.Key_CapsLock: "caps lock", Qt.Key.Key_NumLock: "num lock",
-    Qt.Key.Key_ScrollLock: "scroll lock",
-    Qt.Key.Key_Print: "print screen", Qt.Key.Key_Pause: "pause",
+    Qt.Key.Key_CapsLock: "capslock", Qt.Key.Key_NumLock: "numlock",
+    Qt.Key.Key_ScrollLock: "scrolllock",
+    Qt.Key.Key_Print: "printscreen", Qt.Key.Key_Pause: "pause",
     Qt.Key.Key_Menu: "menu",
 }
 
@@ -158,7 +158,7 @@ _LANGUAGES = [
 class SettingsDialog(QDialog):
     """Tabbed settings dialog with 5 tabs and OK/Cancel/Reset to Defaults."""
 
-    RESTART_KEYS = {"recognition.model", "recognition.device", "recognition.compute_type"}
+    RESTART_KEYS = {"recognition.device", "recognition.compute_type"}
 
     def __init__(self, config: ConfigManager, parent=None):
         super().__init__(parent)
@@ -525,7 +525,18 @@ class SettingsDialog(QDialog):
         self._config.set("recognition", "model", model_name)
         self._config.save()
         self._populate_models_table()
-        self._model_status.setText("Перезапустите приложение для смены модели")
+        # Синхронизировать combo модели на вкладке "Распознавание"
+        self._sync_model_combo(model_name)
+        self._model_status.setText(f"Модель {model_name} будет загружена при нажатии OK")
+
+    def _sync_model_combo(self, model_name: str):
+        """Синхронизировать _model_combo на вкладке 'Распознавание' с выбранной моделью."""
+        idx = self._model_combo.findData(model_name)
+        if idx < 0:
+            label = MODEL_LABELS.get(model_name, model_name)
+            self._model_combo.addItem(f"{label} ({model_name})", model_name)
+            idx = self._model_combo.findData(model_name)
+        self._model_combo.setCurrentIndex(idx)
 
     def _on_model_download(self, model_name):
         if self._download_thread is not None and self._download_thread.isRunning():

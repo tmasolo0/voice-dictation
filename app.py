@@ -106,37 +106,55 @@ class Application:
         self.widget.show()
 
         # Startup info
+        import ctypes
         version = get_version()
         hotkey = config.get('recognition', 'hotkey', default='f9')
+        history_hotkey = config.get('recognition', 'history_hotkey', default='ctrl+h')
         dictation_model = config.get('recognition', 'model', default=MODEL_TURBO)
+        preview_enabled = config.get('preview', 'enabled', default=False)
+        auto_delay = config.get('preview', 'auto_insert_delay', default=5)
+        try:
+            is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
+        except Exception:
+            is_admin = False
         banner = (
             f"Voice Dictation v{version} | "
             f"Запись: {hotkey.upper()} | "
-            f"Модель: {dictation_model}"
+            f"История: {history_hotkey.upper()} | "
+            f"Модель: {dictation_model} | "
+            f"Preview: {preview_enabled} (delay={auto_delay}s) | "
+            f"Admin: {is_admin}"
         )
         log.info(banner)
 
     def _on_text_processed(self, text: str):
         """Координация preview popup: показать или вставить мгновенно."""
+        log.info("on_text_processed: text_len=%d redictate=%s", len(text), self._redictate_mode)
+
         if self._redictate_mode:
             self._redictate_mode = False
             auto_delay = config.get('preview', 'auto_insert_delay', default=5)
             self.preview_popup.update_text(text)
             if auto_delay > 0:
                 self.preview_popup.restart_timer(auto_delay)
+            log.info("on_text_processed: redictate mode, updating preview")
             return
 
         preview_enabled = config.get('preview', 'enabled', default=False)
         auto_delay = config.get('preview', 'auto_insert_delay', default=5)
 
         if not preview_enabled or auto_delay == 0:
+            log.info("on_text_processed: direct insert (preview=%s delay=%d)",
+                     preview_enabled, auto_delay)
             self.inserter._on_text_ready(text)
             return
 
+        log.info("on_text_processed: showing preview (delay=%d)", auto_delay)
         self.preview_popup.show_preview(text, auto_delay)
 
     def _on_preview_insert(self, text: str):
         """Вставка текста из preview popup (возможно отредактированного)."""
+        log.info("on_preview_insert: text_len=%d", len(text))
         self._redictate_mode = False
         self.inserter._on_text_ready(text)
 
@@ -159,7 +177,9 @@ class Application:
 
     def _on_state_changed(self, state_name: str):
         """Включить hotkey только в состоянии READY."""
-        self.hotkeys.set_enabled(state_name == "ready")
+        enabled = state_name == "ready"
+        log.debug("state_changed: %s -> hotkeys_enabled=%s", state_name, enabled)
+        self.hotkeys.set_enabled(enabled)
 
     def _on_mode_changed(self, key, value):
         """Централизованная обработка переключения режимов."""
@@ -199,6 +219,7 @@ class Application:
         old_hotkey = config.get('recognition', 'hotkey', default='f9')
         old_history_hotkey = config.get('recognition', 'history_hotkey', default='ctrl+h')
         old_size = config.get('widget', 'size', default=100)
+        old_model = config.get('recognition', 'model', default=MODEL_TURBO)
 
         dialog = SettingsDialog(config, parent=self.widget)
         result = dialog.exec()
@@ -211,8 +232,11 @@ class Application:
             new_hotkey = config.get('recognition', 'hotkey', default='f9')
             new_history_hotkey = config.get('recognition', 'history_hotkey', default='ctrl+h')
             if new_hotkey != old_hotkey:
+                log.info("settings: hotkey changed '%s' -> '%s'", old_hotkey, new_hotkey)
                 self.hotkeys.update_hotkey(new_hotkey)
             if new_history_hotkey != old_history_hotkey:
+                log.info("settings: history_hotkey changed '%s' -> '%s'",
+                         old_history_hotkey, new_history_hotkey)
                 self.hotkeys.update_history_hotkey(new_history_hotkey)
 
             # Hot-apply: размер виджета
@@ -220,6 +244,12 @@ class Application:
             if new_size != old_size:
                 self.widget.setFixedSize(new_size, new_size)
                 self.widget.update()
+
+            # Hot-apply: смена модели (горячая перезагрузка)
+            new_model = config.get('recognition', 'model', default=MODEL_TURBO)
+            if new_model != old_model:
+                log.info("settings: model changed '%s' -> '%s'", old_model, new_model)
+                self.model_manager.load_model(new_model)
 
     def _prompt_download_models(self):
         """Первый запуск без моделей — предложить скачать."""
