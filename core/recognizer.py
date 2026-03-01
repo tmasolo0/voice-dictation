@@ -9,6 +9,13 @@ from concurrent.futures import ThreadPoolExecutor
 
 log = logging.getLogger(__name__)
 
+_HALLUCINATION_RE = [
+    re.compile(r'(.{8,}?)\1{2,}'),  # одна и та же фраза 3+ раз подряд
+    re.compile(r'^\s*[.…♪♫«»\-\s]+\s*$'),  # только пунктуация/символы
+    re.compile(r'(?i)thank you for watching|thanks for watching|please subscribe'
+               r'|подписывайтесь на канал|субтитры сделал|субтитры выполнены'),
+]
+
 
 class Recognizer:
     """Транскрипция аудио через faster-whisper, с поддержкой режима перевода."""
@@ -55,12 +62,19 @@ class Recognizer:
                 language = None
             initial_prompt = self._config.get('recognition', 'initial_prompt', default='') or None
 
+            vad_params = {
+                'threshold': self._config.get('vad', 'threshold', default=0.5),
+                'min_speech_duration_ms': self._config.get('vad', 'min_speech_ms', default=250),
+                'min_silence_duration_ms': self._config.get('vad', 'min_silence_ms', default=500),
+            }
+
             if translate_mode:
                 segments, info = model.transcribe(
                     audio_data,
                     language=language,
                     task="translate",
                     vad_filter=True,
+                    vad_parameters=vad_params,
                     initial_prompt=initial_prompt,
                     hotwords=hotwords or None,
                     condition_on_previous_text=self._config.get('recognition', 'condition_on_previous_text', default=False),
@@ -75,6 +89,7 @@ class Recognizer:
                     audio_data,
                     language=language,
                     vad_filter=True,
+                    vad_parameters=vad_params,
                     initial_prompt=initial_prompt,
                     hotwords=hotwords or None,
                     condition_on_previous_text=self._config.get('recognition', 'condition_on_previous_text', default=False),
@@ -89,7 +104,31 @@ class Recognizer:
                     hallucination_silence_threshold=self._config.get('recognition', 'hallucination_silence_threshold', default=2.0),
                 )
 
-            text = "".join([s.text for s in segments]).strip()
+            # Фильтрация сегментов по качеству (защита от галлюцинаций)
+            no_speech_thr = self._config.get('recognition', 'no_speech_threshold', default=0.6)
+            logprob_thr = self._config.get('recognition', 'log_prob_threshold', default=-1.0)
+            compress_thr = self._config.get('recognition', 'compression_ratio_threshold', default=2.4)
+
+            filtered_texts = []
+            for s in segments:
+                if s.no_speech_prob > no_speech_thr:
+                    log.debug("skip segment no_speech=%.2f logprob=%.2f: '%s'",
+                              s.no_speech_prob, s.avg_logprob, s.text[:60])
+                    continue
+                if s.avg_logprob < logprob_thr:
+                    log.debug("skip segment logprob=%.2f: '%s'", s.avg_logprob, s.text[:60])
+                    continue
+                if s.compression_ratio > compress_thr:
+                    log.debug("skip segment compress=%.1f: '%s'", s.compression_ratio, s.text[:60])
+                    continue
+                filtered_texts.append(s.text)
+
+            text = "".join(filtered_texts).strip()
+
+            if text and self._is_hallucination(text):
+                log.warning("hallucination filtered: '%s'", text[:100])
+                text = ""
+
             text = self._apply_replacements(text)
             elapsed = time.time() - start
 
@@ -127,6 +166,16 @@ class Recognizer:
             pattern = r'\b' + re.escape(wrong) + r'\b'
             text = re.sub(pattern, correct, text, flags=re.IGNORECASE)
         return text
+
+    def _is_hallucination(self, text):
+        """Детекция типичных шаблонов галлюцинаций Whisper."""
+        stripped = text.strip()
+        if len(stripped) <= 1:
+            return True
+        for pattern in _HALLUCINATION_RE:
+            if pattern.search(stripped):
+                return True
+        return False
 
     def reload_replacements(self):
         """Перезагрузка словаря замен из файла."""
