@@ -19,8 +19,11 @@ _VK = {
     'f5': 0x74, 'f6': 0x75, 'f7': 0x76, 'f8': 0x77,
     'f9': 0x78, 'f10': 0x79, 'f11': 0x7A, 'f12': 0x7B,
     'space': 0x20, 'tab': 0x09, 'escape': 0x1B, 'enter': 0x0D,
-    'insert': 0x2D, 'delete': 0x2E, 'home': 0x24, 'end': 0x23,
-    'pageup': 0x21, 'pagedown': 0x22, 'pause': 0x13,
+    'backspace': 0x08, 'insert': 0x2D, 'delete': 0x2E,
+    'home': 0x24, 'end': 0x23, 'pageup': 0x21, 'pagedown': 0x22,
+    'up': 0x26, 'down': 0x28, 'left': 0x25, 'right': 0x27,
+    'capslock': 0x14, 'numlock': 0x90, 'scrolllock': 0x91,
+    'printscreen': 0x2C, 'pause': 0x13, 'menu': 0x5D,
 }
 _MOD = {'ctrl': 0x0002, 'alt': 0x0001, 'shift': 0x0004, 'win': 0x0008}
 
@@ -79,15 +82,19 @@ class HotkeyManager:
 
     def set_enabled(self, enabled: bool):
         """Включить/выключить обработку горячей клавиши записи."""
+        if self._enabled != enabled:
+            log.debug("set_enabled: %s", enabled)
         self._enabled = enabled
 
     def update_hotkey(self, hotkey: str):
         """Обновить горячую клавишу записи без перезапуска."""
+        log.info("update_hotkey: record '%s' -> '%s'", self._hotkey, hotkey)
         self._hotkey = hotkey
         self._request_update(_ID_RECORD, hotkey)
 
     def update_history_hotkey(self, hotkey: str):
         """Обновить горячую клавишу истории без перезапуска."""
+        log.info("update_hotkey: history '%s' -> '%s'", self._history_hotkey, hotkey)
         self._history_hotkey = hotkey
         self._request_update(_ID_HISTORY, hotkey)
 
@@ -143,7 +150,8 @@ class HotkeyManager:
         while not self._update_q.empty():
             try:
                 hid, hstr = self._update_q.get_nowait()
-                user32.UnregisterHotKey(None, hid)
+                ok = user32.UnregisterHotKey(None, hid)
+                log.info("UnregisterHotKey id=%d: %s", hid, "OK" if ok else "FAILED")
                 self._register(hid, hstr)
             except queue.Empty:
                 break

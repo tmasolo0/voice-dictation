@@ -58,8 +58,21 @@ def setup_logging():
     log_dir.mkdir(exist_ok=True)
     log_file = log_dir / "dictation.log"
 
+    # Debug-режим: через config.json или наличие файла debug.flag
+    debug_forced = (APP_DIR / "debug.flag").exists()
+    if not debug_forced:
+        try:
+            if CONFIG_FILE.exists():
+                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    cfg = json.load(f)
+                debug_forced = cfg.get('system', {}).get('debug_logging', False)
+        except Exception:
+            pass
+
+    level = logging.DEBUG if (debug_forced or not getattr(sys, 'frozen', False)) else logging.INFO
+
     logging.basicConfig(
-        level=logging.INFO if getattr(sys, 'frozen', False) else logging.DEBUG,
+        level=level,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[logging.FileHandler(log_file, encoding='utf-8')]
     )

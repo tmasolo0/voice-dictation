@@ -3,7 +3,6 @@ __pycache__/
 *.pyc
 .claude/
 .claude_settings.json
-CLAUDE.md
 
 # Auto Claude data directory
 .auto-claude/
