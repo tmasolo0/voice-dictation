@@ -54,6 +54,9 @@ def _parse_hotkey(hotkey_str):
     return mod_flags, vk
 
 
+_RECORD_COOLDOWN = 0.5  # секунд между записями
+
+
 class HotkeyManager:
     """Горячие клавиши через RegisterHotKey + GetAsyncKeyState polling для push-to-talk."""
 
@@ -66,6 +69,7 @@ class HotkeyManager:
         self._thread_id = None
         self._running = False
         self._update_q = queue.Queue()
+        self._last_stop_time = 0.0
 
     # --- public API (любой поток) ---
 
@@ -164,6 +168,10 @@ class HotkeyManager:
         if hotkey_id == _ID_RECORD:
             if not self._enabled or self._recording:
                 return
+            elapsed = time.monotonic() - self._last_stop_time
+            if elapsed < _RECORD_COOLDOWN:
+                log.debug("hotkey ignored: cooldown %.0fms", elapsed * 1000)
+                return
             self._recording = True
             hwnd = win32gui.GetForegroundWindow()
             log.info("recording_start hwnd=%s", hwnd)
@@ -178,6 +186,7 @@ class HotkeyManager:
             if not (state & 0x8000):
                 if self._recording:
                     self._recording = False
+                    self._last_stop_time = time.monotonic()
                     log.info("recording_stop")
                     self._bus.recording_stop.emit()
                 return
