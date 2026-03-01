@@ -19,6 +19,9 @@ models/*
 # Planning docs (local only)
 .planning/
 
+# Handoff files (APP → Code, local only)
+.handoff/
+
 # User config (created automatically on first run)
 config.json
 
