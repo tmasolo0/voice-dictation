@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 """Voice Dictation — entry point."""
+import ctypes
+import json
 import sys
 import io
 import logging
@@ -10,7 +12,45 @@ if not getattr(sys, 'frozen', False):
 
 from PyQt6.QtWidgets import QApplication
 from app import Application
-from core.config_manager import APP_DIR
+from core.config_manager import APP_DIR, CONFIG_FILE
+
+
+def _is_admin():
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def _elevate():
+    """Перезапуск с правами администратора (UAC prompt)."""
+    if getattr(sys, 'frozen', False):
+        exe = sys.executable
+        params = ' '.join(f'"{a}"' for a in sys.argv[1:])
+        workdir = str(Path(sys.executable).parent)
+    else:
+        exe = sys.executable
+        params = ' '.join(f'"{a}"' for a in sys.argv)
+        workdir = str(Path(__file__).parent)
+
+    ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, workdir, 1)
+    if int(ret) > 32:
+        sys.exit(0)
+    # UAC отклонён — продолжаем без повышения
+
+
+def _check_elevation():
+    """Проверить config.json → system.run_as_admin и повысить привилегии если нужно."""
+    if _is_admin():
+        return
+    try:
+        if CONFIG_FILE.exists():
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+            if cfg.get('system', {}).get('run_as_admin', False):
+                _elevate()
+    except Exception:
+        pass
 
 
 def setup_logging():
@@ -37,6 +77,7 @@ def setup_logging():
 
 
 def main():
+    _check_elevation()
     setup_logging()
     qt_app = QApplication(sys.argv)
     qt_app.setQuitOnLastWindowClosed(False)

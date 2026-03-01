@@ -22,7 +22,7 @@ CONFIG_FILE = APP_DIR / "config.json"
 DICTIONARY_FILE = BUNDLE_DIR / "dictionary.txt"
 DICTIONARIES_DIR = BUNDLE_DIR / "dictionaries"
 REPLACEMENTS_FILE = APP_DIR / "replacements.json"
-CONFIG_VERSION = 9
+CONFIG_VERSION = 10
 
 DEFAULT_CONFIG = {
     "version": CONFIG_VERSION,
@@ -80,7 +80,8 @@ DEFAULT_CONFIG = {
     },
     "system": {
         "autostart": False,
-        "start_minimized": False
+        "start_minimized": False,
+        "run_as_admin": False
     }
 }
 

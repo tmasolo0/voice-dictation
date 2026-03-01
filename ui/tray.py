@@ -19,9 +19,6 @@ class TrayManager:
         self._widget = widget
         self._tray_icon = QSystemTrayIcon()
 
-        self.translate_mode = config.get('dictation', 'translate_to_english', default=False)
-        self.dictation_model = config.get('recognition', 'model', default='large-v3-turbo')
-
         self._tray_icon.setIcon(self._create_tray_icon("ready"))
         from app import get_version
         self._tray_icon.setToolTip(f"Voice Dictation v{get_version()}")
@@ -42,10 +39,7 @@ class TrayManager:
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        if self.translate_mode and state == "ready":
-            color = COLORS["translate"]
-        else:
-            color = COLORS.get(state, COLORS["ready"])
+        color = COLORS.get(state, COLORS["ready"])
 
         painter.setBrush(QBrush(color))
         painter.setPen(Qt.PenStyle.NoPen)
@@ -68,9 +62,6 @@ class TrayManager:
         history_action = tray_menu.addAction("История...")
         history_action.triggered.connect(lambda: self._bus.mode_changed.emit("open_history", None))
 
-        translate_action = tray_menu.addAction("✓ Перевод → EN" if self.translate_mode else "Перевод → EN")
-        translate_action.triggered.connect(lambda: self._bus.mode_changed.emit("translate_toggle", None))
-
         tray_menu.addSeparator()
 
         show_action = tray_menu.addAction("Показать")
@@ -92,12 +83,5 @@ class TrayManager:
 
     def _on_mode_changed(self, key: str, value):
         """Обновить меню и показать уведомление при смене режима."""
-        if key == "translate_toggle":
-            self.translate_mode = not self.translate_mode
-            model_name = 'medium' if self.translate_mode else self.dictation_model
-            mode_text = f"EN (перевод, {model_name})" if self.translate_mode else f"RU/EN ({self.dictation_model})"
-            self._tray_icon.showMessage("Dictation", f"Режим: {mode_text}",
-                                        QSystemTrayIcon.MessageIcon.Information, 2000)
-            self._rebuild_menu()
-            self._tray_icon.setIcon(self._create_tray_icon("ready"))
+        pass
 

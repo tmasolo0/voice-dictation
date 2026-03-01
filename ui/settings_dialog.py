@@ -216,9 +216,6 @@ class SettingsDialog(QDialog):
         self._hotkey_edit = HotkeyEdit()
         form.addRow("Горячая клавиша записи:", self._hotkey_edit)
 
-        self._translate_hotkey_edit = HotkeyEdit()
-        form.addRow("Горячая клавиша перевода:", self._translate_hotkey_edit)
-
         self._history_hotkey_edit = HotkeyEdit()
         form.addRow("Горячая клавиша истории:", self._history_hotkey_edit)
 
@@ -572,7 +569,6 @@ class SettingsDialog(QDialog):
 
         # General
         self._hotkey_edit.setHotkey(c.get("recognition", "hotkey", default="f9"))
-        self._translate_hotkey_edit.setHotkey(c.get("recognition", "translate_hotkey", default="f10"))
         self._history_hotkey_edit.setHotkey(c.get("recognition", "history_hotkey", default="ctrl+h"))
 
         lang = c.get("recognition", "language", default="auto")
@@ -636,7 +632,6 @@ class SettingsDialog(QDialog):
 
         # General
         vals["recognition.hotkey"] = self._hotkey_edit.hotkey()
-        vals["recognition.translate_hotkey"] = self._translate_hotkey_edit.hotkey()
         vals["recognition.history_hotkey"] = self._history_hotkey_edit.hotkey()
         vals["recognition.language"] = self._language_combo.currentData()
         vals["system.autostart"] = self._autostart_check.isChecked()
@@ -791,7 +786,6 @@ class SettingsDialog(QDialog):
 
     def _reset_general(self, d: dict):
         self._hotkey_edit.setHotkey(d["recognition"]["hotkey"])
-        self._translate_hotkey_edit.setHotkey(d["recognition"]["translate_hotkey"])
         self._history_hotkey_edit.setHotkey(d["recognition"]["history_hotkey"])
 
         idx = self._language_combo.findData(d["recognition"]["language"])

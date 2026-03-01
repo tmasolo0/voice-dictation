@@ -38,7 +38,6 @@ from ui.preview_popup import PreviewPopup
 
 
 MODEL_TURBO = 'large-v3-turbo'
-MODEL_TRANSLATE = 'medium'
 
 
 class Application:
@@ -98,8 +97,7 @@ class Application:
             self._prompt_download_models()
 
         # Загрузка модели
-        translate_mode = config.get('dictation', 'translate_to_english', default=False)
-        model_name = MODEL_TRANSLATE if translate_mode else config.get('recognition', 'model', default=MODEL_TURBO)
+        model_name = config.get('recognition', 'model', default=MODEL_TURBO)
         self.model_manager.load_model(model_name)
 
         # Запуск сервисов
@@ -110,13 +108,11 @@ class Application:
         # Startup info
         version = get_version()
         hotkey = config.get('recognition', 'hotkey', default='f9')
-        translate_hotkey = config.get('recognition', 'translate_hotkey', default='f10')
         dictation_model = config.get('recognition', 'model', default=MODEL_TURBO)
         banner = (
             f"Voice Dictation v{version} | "
-            f"Запись: {hotkey.upper()} | Перевод: {translate_hotkey.upper()} | "
-            f"Модель: {dictation_model} | "
-            f"Режим: {'EN (перевод)' if translate_mode else 'RU/EN (авто)'}"
+            f"Запись: {hotkey.upper()} | "
+            f"Модель: {dictation_model}"
         )
         log.info(banner)
 
@@ -181,22 +177,6 @@ class Application:
             config.save()
             return
 
-        if key == "translate_hotkey_changed":
-            self.hotkeys.update_translate_hotkey(value)
-            config.set('recognition', 'translate_hotkey', value)
-            config.save()
-            return
-
-        if key == "translate_toggle":
-            current = config.get('dictation', 'translate_to_english', default=False)
-            new_value = not current
-            config.set('dictation', 'translate_to_english', new_value)
-            config.save()
-
-            dictation_model = config.get('recognition', 'model', default=MODEL_TURBO)
-            new_model = MODEL_TRANSLATE if new_value else dictation_model
-            self.model_manager.load_model(new_model)
-
     def _open_history(self):
         """Открыть диалог истории диктовок."""
         import win32gui
@@ -217,7 +197,6 @@ class Application:
 
         # Снапшот для сравнения
         old_hotkey = config.get('recognition', 'hotkey', default='f9')
-        old_translate_hotkey = config.get('recognition', 'translate_hotkey', default='f10')
         old_history_hotkey = config.get('recognition', 'history_hotkey', default='ctrl+h')
         old_size = config.get('widget', 'size', default=100)
 
@@ -230,12 +209,9 @@ class Application:
         if result == dialog.DialogCode.Accepted:
             # Hot-apply: горячие клавиши
             new_hotkey = config.get('recognition', 'hotkey', default='f9')
-            new_translate_hotkey = config.get('recognition', 'translate_hotkey', default='f10')
             new_history_hotkey = config.get('recognition', 'history_hotkey', default='ctrl+h')
             if new_hotkey != old_hotkey:
                 self.hotkeys.update_hotkey(new_hotkey)
-            if new_translate_hotkey != old_translate_hotkey:
-                self.hotkeys.update_translate_hotkey(new_translate_hotkey)
             if new_history_hotkey != old_history_hotkey:
                 self.hotkeys.update_history_hotkey(new_history_hotkey)
 
