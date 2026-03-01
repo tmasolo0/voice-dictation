@@ -489,7 +489,7 @@ class SettingsDialog(QDialog):
 
         for row, (name, info) in enumerate(models):
             downloaded = is_model_downloaded(name)
-            is_active = downloaded and (name == active_model)
+            is_active = (name == active_model)
 
             self._models_table.setItem(row, 0, QTableWidgetItem(f"{name}\n{info['description']}"))
             self._models_table.setItem(row, 1, QTableWidgetItem(f"{info['size_gb']:.1f} GB"))
@@ -508,7 +508,7 @@ class SettingsDialog(QDialog):
             if is_active:
                 btn.setText("Активна")
                 btn.setEnabled(False)
-            elif downloaded:
+            elif downloaded or not info["downloadable"]:
                 btn.setText("Выбрать")
                 btn.clicked.connect(lambda checked, n=name: self._on_model_select(n))
             elif info["downloadable"]:
