@@ -71,11 +71,15 @@ def setup_logging():
 
     level = logging.DEBUG if (debug_forced or not getattr(sys, 'frozen', False)) else logging.INFO
 
-    logging.basicConfig(
-        level=level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[logging.FileHandler(log_file, encoding='utf-8')]
-    )
+    # force=True гарантирует настройку даже если библиотеки уже настроили root logger
+    fmt = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    handlers = [logging.FileHandler(log_file, encoding='utf-8')]
+
+    # Dev-режим: дублируем в консоль для отладки
+    if not getattr(sys, 'frozen', False):
+        handlers.append(logging.StreamHandler(sys.stderr))
+
+    logging.basicConfig(level=level, format=fmt, handlers=handlers, force=True)
 
     # Frozen windowed: stdout/stderr -> лог-файл (не StringIO)
     if getattr(sys, 'frozen', False):

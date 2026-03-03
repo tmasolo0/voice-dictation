@@ -50,6 +50,13 @@ class AudioCapture:
             with self._lock:
                 self._audio_data.append(indata.copy())
 
+    def stop_recording(self):
+        """Принудительная остановка записи (без обработки аудио)."""
+        self._recording_event.clear()
+        with self._lock:
+            self._audio_data = []
+        log.info("recording force-stopped (data discarded)")
+
     def _on_start(self, hwnd):
         """Начало записи."""
         with self._lock:
@@ -72,12 +79,14 @@ class AudioCapture:
             audio_np = self._trim_silence(audio_np)
             if len(audio_np) < SAMPLE_RATE * 0.1:
                 log.warning("audio too short after trim: %d samples", len(audio_np))
+                self._bus.error_occurred.emit("AudioCapture", "Запись слишком короткая")
                 return
             audio_np = self._normalize(audio_np)
             log.info("audio_ready: samples=%d duration=%.1fs", len(audio_np), len(audio_np) / SAMPLE_RATE)
             self._bus.audio_ready.emit(audio_np)
         else:
             log.warning("no audio data recorded")
+            self._bus.error_occurred.emit("AudioCapture", "Нет записанных данных")
 
     def _trim_silence(self, audio, threshold=0.01, margin_samples=1600):
         """Обрезать тишину в начале и конце аудио."""

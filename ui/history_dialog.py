@@ -3,9 +3,6 @@
 import time
 from datetime import datetime
 
-import pyautogui
-import pyperclip
-import win32gui
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog,
@@ -18,6 +15,8 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QVBoxLayout,
 )
+
+from core.text_inserter import clipboard_set, force_foreground, insert_text
 
 
 class HistoryDialog(QDialog):
@@ -105,7 +104,7 @@ class HistoryDialog(QDialog):
     def _on_item_clicked(self, item: QListWidgetItem):
         """Копировать текст в буфер при клике."""
         rec = item.data(Qt.ItemDataRole.UserRole)
-        pyperclip.copy(rec['text'])
+        clipboard_set(rec['text'])
         self._insert_btn.setEnabled(True)
 
     def _on_selection_changed(self):
@@ -113,7 +112,7 @@ class HistoryDialog(QDialog):
         self._insert_btn.setEnabled(bool(self._list.selectedItems()))
 
     def _on_insert(self):
-        """Вставить выбранную запись в целевое окно."""
+        """Вставить выбранную запись в целевое окно (гибридная стратегия)."""
         items = self._list.selectedItems()
         if not items:
             return
@@ -123,15 +122,10 @@ class HistoryDialog(QDialog):
         self.accept()
 
         if self._target_hwnd:
-            try:
-                win32gui.SetForegroundWindow(self._target_hwnd)
-                time.sleep(0.05)
-            except Exception:
-                pass
+            force_foreground(self._target_hwnd)
+            time.sleep(0.05)
 
-        pyperclip.copy(text)
-        time.sleep(0.05)
-        pyautogui.hotkey('ctrl', 'v')
+        insert_text(text, self._target_hwnd)
 
     def _on_clear(self):
         """Очистить всю историю после подтверждения."""

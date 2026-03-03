@@ -59,9 +59,6 @@ class TrayManager:
         settings_action = tray_menu.addAction("Настройки...")
         settings_action.triggered.connect(lambda: self._bus.mode_changed.emit("open_settings", None))
 
-        history_action = tray_menu.addAction("История...")
-        history_action.triggered.connect(lambda: self._bus.mode_changed.emit("open_history", None))
-
         tray_menu.addSeparator()
 
         show_action = tray_menu.addAction("Показать")

@@ -65,7 +65,6 @@ class HotkeyManager:
         self._recording = False
         self._enabled = True
         self._hotkey = config.get('recognition', 'hotkey', default='f9')
-        self._history_hotkey = config.get('recognition', 'history_hotkey', default='ctrl+h')
         self._thread_id = None
         self._running = False
         self._update_q = queue.Queue()
@@ -89,6 +88,10 @@ class HotkeyManager:
         if self._enabled != enabled:
             log.debug("set_enabled: %s", enabled)
         self._enabled = enabled
+        # Safety: при возврате в READY сбросить _recording, чтобы не застрять навсегда
+        if enabled and self._recording:
+            log.warning("set_enabled: forcing _recording=False (was stuck)")
+            self._recording = False
 
     def update_hotkey(self, hotkey: str):
         """Обновить горячую клавишу записи без перезапуска."""
@@ -117,10 +120,8 @@ class HotkeyManager:
         user32.PeekMessageW(ctypes.byref(msg_init), None, 0, 0, 0)
 
         self._register(_ID_RECORD, self._hotkey)
-        self._register(_ID_HISTORY, self._history_hotkey)
 
-        log.info("RegisterHotKey started: record=%s history=%s",
-                 self._hotkey, self._history_hotkey)
+        log.info("RegisterHotKey started: record=%s", self._hotkey)
 
         msg = ctypes.wintypes.MSG()
         while self._running:
@@ -135,7 +136,6 @@ class HotkeyManager:
                 break
 
         user32.UnregisterHotKey(None, _ID_RECORD)
-        user32.UnregisterHotKey(None, _ID_HISTORY)
         log.info("RegisterHotKey stopped")
 
     def _register(self, hotkey_id, hotkey_str):
@@ -161,12 +161,12 @@ class HotkeyManager:
                 break
 
     def _on_hotkey(self, hotkey_id):
-        if hotkey_id == _ID_HISTORY:
-            self._bus.mode_changed.emit("open_history", None)
-            return
-
         if hotkey_id == _ID_RECORD:
-            if not self._enabled or self._recording:
+            if not self._enabled:
+                log.warning("hotkey IGNORED: not enabled (state != READY)")
+                return
+            if self._recording:
+                log.warning("hotkey IGNORED: already recording")
                 return
             elapsed = time.monotonic() - self._last_stop_time
             if elapsed < _RECORD_COOLDOWN:
@@ -174,20 +174,31 @@ class HotkeyManager:
                 return
             self._recording = True
             hwnd = win32gui.GetForegroundWindow()
-            log.info("recording_start hwnd=%s", hwnd)
+            log.info(">>> F9 PRESSED  >>> recording_start hwnd=%s", hwnd)
             self._bus.recording_start.emit(hwnd)
             threading.Thread(target=self._poll_key_up, daemon=True).start()
 
     def _poll_key_up(self):
         """Опрос GetAsyncKeyState до отпускания клавиши записи."""
-        _, vk = _parse_hotkey(self._hotkey)
-        while self._recording:
-            state = user32.GetAsyncKeyState(vk)
-            if not (state & 0x8000):
-                if self._recording:
-                    self._recording = False
-                    self._last_stop_time = time.monotonic()
-                    log.info("recording_stop")
-                    self._bus.recording_stop.emit()
-                return
-            time.sleep(0.02)
+        try:
+            _, vk = _parse_hotkey(self._hotkey)
+            poll_start = time.monotonic()
+            while self._recording:
+                # Защита от бесконечного опроса (макс 120с, как recording_timeout)
+                if time.monotonic() - poll_start > 120:
+                    log.error("_poll_key_up: timeout 120s, forcing stop")
+                    break
+                state = user32.GetAsyncKeyState(vk)
+                if not (state & 0x8000):
+                    break
+                time.sleep(0.02)
+        except Exception as e:
+            log.exception("_poll_key_up error: %s", e)
+        finally:
+            # Гарантированный сброс _recording и эмит recording_stop
+            if self._recording:
+                self._recording = False
+                self._last_stop_time = time.monotonic()
+                hold_time = time.monotonic() - poll_start
+                log.info("<<< F9 RELEASED <<< recording_stop (held %.1fs)", hold_time)
+                self._bus.recording_stop.emit()

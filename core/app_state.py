@@ -22,7 +22,7 @@ VALID_TRANSITIONS = {
     AppState.RECORDING: {AppState.PROCESSING, AppState.READY},
     AppState.PROCESSING: {AppState.READY, AppState.ERROR},
     AppState.MODEL_SWITCHING: {AppState.READY, AppState.ERROR},
-    AppState.ERROR: {AppState.READY},
+    AppState.ERROR: {AppState.READY, AppState.MODEL_SWITCHING},
 }
 
 
@@ -39,9 +39,13 @@ class AppStateMachine:
 
     def transition(self, new_state: AppState) -> bool:
         """Переход в новое состояние. Возвращает True при успехе."""
-        if new_state in VALID_TRANSITIONS.get(self._state, set()):
+        old = self._state
+        if new_state in VALID_TRANSITIONS.get(old, set()):
             self._state = new_state
+            log.info("STATE: %s -> %s", old.name, new_state.name)
             self._bus.state_changed.emit(new_state.name.lower())
             return True
-        log.warning("Invalid transition: %s -> %s", self._state.name, new_state.name)
+        log.warning("INVALID transition: %s -> %s (allowed: %s)",
+                     old.name, new_state.name,
+                     [s.name for s in VALID_TRANSITIONS.get(old, set())])
         return False

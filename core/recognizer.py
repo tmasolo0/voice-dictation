@@ -39,9 +39,16 @@ class Recognizer:
         with self._busy_lock:
             if self._busy:
                 log.warning("Транскрипция уже выполняется — пропускаем")
+                self._bus.error_occurred.emit("Recognizer", "Транскрипция занята")
                 return
             self._busy = True
-        self._executor.submit(self._transcribe, audio_data)
+        try:
+            self._executor.submit(self._transcribe, audio_data)
+        except RuntimeError as e:
+            log.error("executor.submit failed: %s", e)
+            with self._busy_lock:
+                self._busy = False
+            self._bus.error_occurred.emit("Recognizer", str(e))
 
     def _transcribe(self, audio_data):
         """Транскрипция аудио (фоновый поток)."""

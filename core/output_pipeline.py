@@ -99,22 +99,26 @@ class OutputPipeline:
 
     def _on_text_recognized(self, text: str, metadata: dict):
         """Обработка распознанного текста через цепочку процессоров."""
-        log.info("pipeline_start: input='%s' metadata=%s", text[:100], metadata)
+        try:
+            log.info("pipeline_start: input='%s' metadata=%s", text[:100], metadata)
 
-        processors = [StripProcessor()]
-        if self._config.get('postprocessing', 'punctuation', default=True):
-            processors.append(PunctuationProcessor())
-        if self._config.get('postprocessing', 'capitalization', default=True):
-            processors.append(CapitalizationProcessor())
-        if self._config.get('postprocessing', 'trailing_dot', default=True):
-            processors.append(TrailingDotProcessor())
+            processors = [StripProcessor()]
+            if self._config.get('postprocessing', 'punctuation', default=True):
+                processors.append(PunctuationProcessor())
+            if self._config.get('postprocessing', 'capitalization', default=True):
+                processors.append(CapitalizationProcessor())
+            if self._config.get('postprocessing', 'trailing_dot', default=True):
+                processors.append(TrailingDotProcessor())
 
-        for proc in processors:
-            text = proc.process(text, metadata)
-            log.debug("pipeline_step: %s -> '%s'", proc.name, text[:100])
+            for proc in processors:
+                text = proc.process(text, metadata)
+                log.debug("pipeline_step: %s -> '%s'", proc.name, text[:100])
 
-        if text:
-            log.info("pipeline_done: output='%s'", text[:100])
-            self._bus.text_processed.emit(text)
-        else:
-            log.warning("pipeline_done: empty text, skipping emit")
+            if text:
+                log.info("pipeline_done: output='%s'", text[:100])
+                self._bus.text_processed.emit(text)
+            else:
+                log.warning("pipeline_done: empty text, skipping emit")
+        except Exception as e:
+            log.exception("pipeline_error: %s", e)
+            self._bus.error_occurred.emit("OutputPipeline", str(e))

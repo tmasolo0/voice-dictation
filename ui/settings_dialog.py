@@ -216,9 +216,6 @@ class SettingsDialog(QDialog):
         self._hotkey_edit = HotkeyEdit()
         form.addRow("Горячая клавиша записи:", self._hotkey_edit)
 
-        self._history_hotkey_edit = HotkeyEdit()
-        form.addRow("Горячая клавиша истории:", self._history_hotkey_edit)
-
         self._language_combo = QComboBox()
         for code, label in _LANGUAGES:
             self._language_combo.addItem(label, code)
@@ -255,17 +252,6 @@ class SettingsDialog(QDialog):
         gain_layout.addWidget(gain_hint)
         gain_layout.addStretch()
         form.addRow("Усиление микрофона:", gain_layout)
-
-        self._retention_days_spin = QSpinBox()
-        self._retention_days_spin.setRange(0, 365)
-        self._retention_days_spin.setSuffix(" дн.")
-        retention_layout = QHBoxLayout()
-        retention_layout.addWidget(self._retention_days_spin)
-        retention_hint = QLabel("0 = без ограничения по времени")
-        retention_hint.setStyleSheet("color: gray;")
-        retention_layout.addWidget(retention_hint)
-        retention_layout.addStretch()
-        form.addRow("Хранение истории:", retention_layout)
 
         self._tabs.addTab(tab, "Основные")
 
@@ -508,7 +494,7 @@ class SettingsDialog(QDialog):
             if is_active:
                 btn.setText("Активна")
                 btn.setEnabled(False)
-            elif downloaded or not info["downloadable"]:
+            elif downloaded:
                 btn.setText("Выбрать")
                 btn.clicked.connect(lambda checked, n=name: self._on_model_select(n))
             elif info["downloadable"]:
@@ -580,7 +566,6 @@ class SettingsDialog(QDialog):
 
         # General
         self._hotkey_edit.setHotkey(c.get("recognition", "hotkey", default="f9"))
-        self._history_hotkey_edit.setHotkey(c.get("recognition", "history_hotkey", default="ctrl+h"))
 
         lang = c.get("recognition", "language", default="auto")
         idx = self._language_combo.findData(lang)
@@ -592,7 +577,6 @@ class SettingsDialog(QDialog):
         self._preview_enabled_check.setChecked(c.get("preview", "enabled", default=False))
         self._auto_insert_delay_spin.setValue(c.get("preview", "auto_insert_delay", default=5))
         self._audio_gain_spin.setValue(c.get("recognition", "audio_gain", default=1.0))
-        self._retention_days_spin.setValue(c.get("history", "history_retention_days", default=30))
 
         # Recognition
         model = c.get("recognition", "model", default="large-v3-turbo")
@@ -643,14 +627,12 @@ class SettingsDialog(QDialog):
 
         # General
         vals["recognition.hotkey"] = self._hotkey_edit.hotkey()
-        vals["recognition.history_hotkey"] = self._history_hotkey_edit.hotkey()
         vals["recognition.language"] = self._language_combo.currentData()
         vals["system.autostart"] = self._autostart_check.isChecked()
         vals["system.start_minimized"] = self._start_minimized_check.isChecked()
         vals["preview.enabled"] = self._preview_enabled_check.isChecked()
         vals["preview.auto_insert_delay"] = self._auto_insert_delay_spin.value()
         vals["recognition.audio_gain"] = self._audio_gain_spin.value()
-        vals["history.history_retention_days"] = self._retention_days_spin.value()
 
         # Recognition
         vals["recognition.model"] = self._model_combo.currentData()
@@ -797,8 +779,6 @@ class SettingsDialog(QDialog):
 
     def _reset_general(self, d: dict):
         self._hotkey_edit.setHotkey(d["recognition"]["hotkey"])
-        self._history_hotkey_edit.setHotkey(d["recognition"]["history_hotkey"])
-
         idx = self._language_combo.findData(d["recognition"]["language"])
         if idx >= 0:
             self._language_combo.setCurrentIndex(idx)
@@ -808,7 +788,6 @@ class SettingsDialog(QDialog):
         self._preview_enabled_check.setChecked(d["preview"]["enabled"])
         self._auto_insert_delay_spin.setValue(d["preview"]["auto_insert_delay"])
         self._audio_gain_spin.setValue(d["recognition"]["audio_gain"])
-        self._retention_days_spin.setValue(d["history"]["history_retention_days"])
 
     def _reset_recognition(self, d: dict):
         model = d["recognition"]["model"]

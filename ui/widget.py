@@ -307,9 +307,6 @@ class DictationWidget(QWidget):
         settings_action = menu.addAction("Настройки...")
         settings_action.triggered.connect(lambda: self._bus.mode_changed.emit("open_settings", None))
 
-        history_action = menu.addAction("История...")
-        history_action.triggered.connect(lambda: self._bus.mode_changed.emit("open_history", None))
-
         translate_action = menu.addAction("✓ Перевод → EN" if self.translate_mode else "Перевод → EN")
         translate_action.triggered.connect(lambda: self._bus.mode_changed.emit("translate_toggle", None))
 
