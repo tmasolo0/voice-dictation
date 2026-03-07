@@ -23,6 +23,8 @@ a = Analysis(
         ('VERSION', '.'),
         ('dictionary.txt', '.'),
         ('dictionaries', 'dictionaries'),
+        ('Ava.jpg', '.'),
+        ('assets/sounds', 'assets/sounds'),
     ] + fw_assets,
     hiddenimports=[
         # PyQt6

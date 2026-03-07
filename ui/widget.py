@@ -1,84 +1,140 @@
-"""DictationWidget — UI-only виджет голосовой диктовки."""
+"""DictationWidget — горизонтальная pill-bar панель в стиле Aqua Voice."""
 
+import ctypes
+import ctypes.wintypes
+import logging
 import math
-import win32gui
-import win32api
-import win32con
+import os
+import sys
+import winsound
 
 from PyQt6.QtWidgets import QApplication, QWidget, QMenu
-from PyQt6.QtCore import Qt, QPoint, QTimer
-from PyQt6.QtGui import QPainter, QColor, QBrush, QPen
+from PyQt6.QtCore import Qt, QPoint, QTimer, QRect, QRectF
+from PyQt6.QtGui import (
+    QPainter, QColor, QBrush, QPen, QFont, QPixmap,
+    QPainterPath, QLinearGradient,
+)
 
+log = logging.getLogger(__name__)
 
-
-# Цвета состояний
+# Цвета состояний (используются также в tray.py)
 COLORS = {
     "ready": QColor(76, 175, 80),       # Зелёный — готов
     "recording": QColor(244, 67, 54),   # Красный — запись
     "processing": QColor(255, 193, 7),  # Жёлтый — обработка
-    "translate": QColor(33, 150, 243),  # Синий — режим перевода
 }
 
 # Анимация
 ANIMATION_INTERVAL = 50  # мс
-PULSE_SPEED_READY = 0.03
-PULSE_SPEED_RECORDING = 0.1
-FULLSCREEN_CHECK_INTERVAL = 1500
 
 
-def is_fullscreen_app_active() -> bool:
-    """Проверка, активно ли полноэкранное приложение."""
-    try:
-        hwnd = win32gui.GetForegroundWindow()
-        if not hwnd:
-            return False
-        rect = win32gui.GetWindowRect(hwnd)
-        monitor = win32api.MonitorFromWindow(hwnd, win32con.MONITOR_DEFAULTTONEAREST)
-        monitor_info = win32api.GetMonitorInfo(monitor)
-        monitor_rect = monitor_info['Monitor']
-        return (
-            rect[0] <= monitor_rect[0] and
-            rect[1] <= monitor_rect[1] and
-            rect[2] >= monitor_rect[2] and
-            rect[3] >= monitor_rect[3]
-        )
-    except Exception:
-        return False
+def get_taskbar_rect():
+    """Получить прямоугольник таскбара через Windows API."""
+    class APPBARDATA(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", ctypes.wintypes.DWORD),
+            ("hWnd", ctypes.wintypes.HWND),
+            ("uCallbackMessage", ctypes.c_uint),
+            ("uEdge", ctypes.c_uint),
+            ("rc", ctypes.wintypes.RECT),
+            ("lParam", ctypes.wintypes.LPARAM),
+        ]
+
+    ABM_GETTASKBARPOS = 5
+    abd = APPBARDATA()
+    abd.cbSize = ctypes.sizeof(APPBARDATA)
+
+    result = ctypes.windll.shell32.SHAppBarMessage(ABM_GETTASKBARPOS, ctypes.byref(abd))
+    if result:
+        rc = abd.rc
+        return abd.uEdge, QRect(rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top)
+    return None, None
+
+
+def _get_sound_path(name: str) -> str:
+    """Путь к звуковому файлу."""
+    if getattr(sys, 'frozen', False):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, 'assets', 'sounds', name)
+
+
+def _get_avatar_path() -> str:
+    """Путь к аватару."""
+    if getattr(sys, 'frozen', False):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, 'Ava.jpg')
 
 
 class DictationWidget(QWidget):
-    """Минималистичный виджет — только UI, без бизнес-логики."""
+    """Горизонтальная pill-bar панель — аватар, waveform, бейдж горячей клавиши."""
 
-    def __init__(self, event_bus, config):
+    def __init__(self, event_bus, config, audio_capture=None):
         super().__init__()
 
         self._bus = event_bus
         self._config = config
+        self._audio = audio_capture
 
         # Визуальное состояние
         self._current_state = "ready"
-        self.translate_mode = config.get('dictation', 'translate_to_english', default=False)
         self.dictation_model = config.get('recognition', 'model', default='large-v3-turbo')
         self._vram_mb = 0
 
         # Перетаскивание
         self._drag_position = QPoint()
+        self._dragging = False
 
-        # Автоскрытие в fullscreen
-        self._hidden_by_fullscreen = False
         self.minimized_to_tray = False
+
+        # Hover
+        self._hovered = False
 
         # Анимация
         self._animation_phase = 0.0
+        self._hover_opacity = 0.0
+        self._processing_dots = 0
+
+        # Audio levels для waveform
+        self._audio_levels = []
+
+        # Аватар
+        self._avatar_pixmap = None
+        self._load_avatar()
+
+        # Звуки
+        self._sound_start = _get_sound_path('start.wav')
+        self._sound_stop = _get_sound_path('stop.wav')
 
         self._setup_ui()
-        self._start_fullscreen_monitor()
         self._start_animation()
 
         # Подписка на сигналы
         self._bus.state_changed.connect(self._on_state_changed)
-        self._bus.mode_changed.connect(self._on_mode_changed)
         self._bus.vram_updated.connect(self._on_vram_updated)
+
+    def _load_avatar(self):
+        """Загрузка и подготовка круглого аватара."""
+        path = _get_avatar_path()
+        if os.path.exists(path):
+            pixmap = QPixmap(path)
+            if not pixmap.isNull():
+                size = 24
+                scaled = pixmap.scaled(size, size,
+                                       Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                                       Qt.TransformationMode.SmoothTransformation)
+                if scaled.width() != size or scaled.height() != size:
+                    x = (scaled.width() - size) // 2
+                    y = (scaled.height() - size) // 2
+                    scaled = scaled.copy(x, y, size, size)
+                self._avatar_pixmap = scaled
+            else:
+                log.warning("Avatar pixmap is null: %s", path)
+        else:
+            log.warning("Avatar not found: %s", path)
 
     def _setup_ui(self):
         """Настройка UI виджета."""
@@ -88,9 +144,11 @@ class DictationWidget(QWidget):
             Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setMouseTracking(True)
 
-        size = self._config.get('widget', 'size', default=100)
-        self.setFixedSize(size, size)
+        bar_w = self._config.get('widget', 'bar_width', default=200)
+        bar_h = self._config.get('widget', 'bar_height', default=36)
+        self.setFixedSize(bar_w, bar_h)
 
         pos = self._load_position()
         self.move(pos)
@@ -99,21 +157,43 @@ class DictationWidget(QWidget):
 
     def _load_position(self) -> QPoint:
         """Загрузка позиции из конфига."""
-        x = self._config.get('widget', 'position', 'x', default=None)
-        y = self._config.get('widget', 'position', 'y', default=None)
+        auto = self._config.get('widget', 'auto_position', default=True)
+        if not auto:
+            x = self._config.get('widget', 'position', 'x', default=None)
+            y = self._config.get('widget', 'position', 'y', default=None)
+            if x is not None and y is not None:
+                pos = QPoint(x, y)
+                if self._is_position_valid(pos):
+                    return pos
 
-        if x is not None and y is not None:
-            pos = QPoint(x, y)
-            if self._is_position_valid(pos):
-                return pos
+        return self._get_auto_position()
 
-        return self._get_default_position()
-
-    def _get_default_position(self) -> QPoint:
-        """Позиция по умолчанию (правый нижний угол)."""
+    def _get_auto_position(self) -> QPoint:
+        """Позиция по центру экрана, над таскбаром."""
         screen = QApplication.primaryScreen().geometry()
-        size = self._config.get('widget', 'size', default=100)
-        return QPoint(screen.width() - size - 50, screen.height() - size - 100)
+        bar_w = self.width()
+        bar_h = self.height()
+
+        x = (screen.width() - bar_w) // 2
+
+        edge, taskbar_rect = get_taskbar_rect()
+        if taskbar_rect is not None:
+            if edge == 3:  # bottom
+                y = taskbar_rect.top() - bar_h - 8
+            elif edge == 1:  # top
+                y = taskbar_rect.bottom() + 8
+            elif edge == 0:  # left
+                y = screen.height() - bar_h - 60
+                x = taskbar_rect.right() + 8
+            elif edge == 2:  # right
+                y = screen.height() - bar_h - 60
+                x = taskbar_rect.left() - bar_w - 8
+            else:
+                y = screen.height() - bar_h - 60
+        else:
+            y = screen.height() - bar_h - 60
+
+        return QPoint(max(0, x), max(0, y))
 
     def _is_position_valid(self, pos: QPoint) -> bool:
         """Проверка, что позиция на экране."""
@@ -125,63 +205,73 @@ class DictationWidget(QWidget):
         self._config.set('widget', 'position', 'x', self.x())
         self._config.set('widget', 'position', 'y', self.y())
 
-    def _start_fullscreen_monitor(self):
-        """Запуск мониторинга полноэкранных приложений."""
-        if not self._config.get('widget', 'hide_in_fullscreen', default=True):
-            return
-
-        self._fullscreen_timer = QTimer()
-        self._fullscreen_timer.timeout.connect(self._check_fullscreen_visibility)
-        self._fullscreen_timer.start(FULLSCREEN_CHECK_INTERVAL)
-
-    def _check_fullscreen_visibility(self):
-        """Проверка видимости в fullscreen."""
-        if self.minimized_to_tray:
-            return
-
-        is_fullscreen = is_fullscreen_app_active()
-
-        if is_fullscreen and not self._hidden_by_fullscreen:
-            self.hide()
-            self._hidden_by_fullscreen = True
-        elif not is_fullscreen and self._hidden_by_fullscreen:
-            self.show()
-            self._hidden_by_fullscreen = False
+    def _reset_position(self):
+        """Сброс позиции к авто-позиции над таскбаром."""
+        self._config.set('widget', 'auto_position', True)
+        self._config.set('widget', 'position', 'x', None)
+        self._config.set('widget', 'position', 'y', None)
+        self._config.save()
+        pos = self._get_auto_position()
+        self.move(pos)
 
     def _start_animation(self):
-        """Запуск анимации пульсации."""
+        """Запуск анимации."""
         self._animation_timer = QTimer()
         self._animation_timer.timeout.connect(self._animate)
         self._animation_timer.start(ANIMATION_INTERVAL)
 
     def _animate(self):
-        """Обновление фазы анимации."""
-        if self._current_state == "ready":
-            self._animation_phase += PULSE_SPEED_READY
-        elif self._current_state == "recording":
-            self._animation_phase += PULSE_SPEED_RECORDING
-
+        """Обновление анимации + poll audio levels."""
+        self._animation_phase += 0.08
         if self._animation_phase > 2 * math.pi:
             self._animation_phase -= 2 * math.pi
 
+        # Hover opacity плавное нарастание/убывание
+        if self._hovered and self._current_state == "ready":
+            self._hover_opacity = min(1.0, self._hover_opacity + 0.15)
+        else:
+            self._hover_opacity = max(0.0, self._hover_opacity - 0.15)
+
+        # Processing dots
+        if self._current_state == "processing":
+            self._processing_dots = (self._processing_dots + 1) % 12
+
+        # Audio levels для waveform
+        if self._current_state == "recording" and self._audio is not None:
+            self._audio_levels = self._audio.get_audio_levels()
+
         self.update()
 
+    def _play_sound(self, path):
+        """Воспроизвести звук асинхронно."""
+        if not self._config.get('widget', 'sound_effects', default=True):
+            return
+        try:
+            if os.path.exists(path):
+                winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+        except Exception as e:
+            log.debug("Sound play error: %s", e)
+
     def _on_state_changed(self, state: str):
-        """Обновление визуального состояния."""
+        """Обновление визуального состояния + звуки."""
+        old_state = self._current_state
         self._current_state = state
         self._animation_phase = 0.0
+
+        if state == "recording" and old_state != "recording":
+            self._play_sound(self._sound_start)
+        elif state == "processing" and old_state == "recording":
+            self._play_sound(self._sound_stop)
+
+        if state != "recording":
+            self._audio_levels = []
+
         self.update()
 
     def _on_vram_updated(self, vram_mb: int):
         """Обновление отображения VRAM."""
         self._vram_mb = vram_mb
         self.update()
-
-    def _on_mode_changed(self, key: str, value):
-        """Обновление режимов для отображения."""
-        if key == "translate_toggle":
-            self.translate_mode = not self.translate_mode
-            self.update()
 
     def _minimize_to_tray(self):
         """Свернуть в трей."""
@@ -197,120 +287,209 @@ class DictationWidget(QWidget):
     # --- Отрисовка ---
 
     def paintEvent(self, event):
-        """Отрисовка виджета."""
+        """Отрисовка pill-bar панели."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        size = self.width()
-        center = size // 2
+        w = self.width()
+        h = self.height()
+        radius = h // 2
 
-        # Цвет в зависимости от режима
-        if self.translate_mode and self._current_state == "ready":
-            base_color = COLORS["translate"]
+        # Фон — тёмный полупрозрачный
+        bg_path = QPainterPath()
+        bg_path.addRoundedRect(QRectF(0, 0, w, h), radius, radius)
+        painter.fillPath(bg_path, QColor(30, 30, 30, 220))
+
+        # Тонкая рамка
+        painter.setPen(QPen(QColor(255, 255, 255, 30), 1))
+        painter.drawPath(bg_path)
+
+        # Аватар (слева)
+        avatar_x = 6
+        avatar_y = (h - 24) // 2
+        self._draw_avatar(painter, avatar_x, avatar_y)
+
+        content_left = avatar_x + 24 + 8  # после аватара + отступ
+        content_right = w - 8
+
+        if self._current_state == "recording":
+            self._draw_waveform(painter, content_left, content_right, h)
+        elif self._current_state == "processing":
+            self._draw_processing(painter, content_left, content_right, h)
         else:
-            base_color = COLORS.get(self._current_state, COLORS["ready"])
-
-        # Пульсация
-        if self._current_state in ("ready", "recording"):
-            pulse = 0.15 * math.sin(self._animation_phase)
-            radius = int(center * (0.8 + pulse))
-        else:
-            radius = int(center * 0.8)
-
-        # Тень
-        shadow_color = QColor(0, 0, 0, 50)
-        painter.setBrush(QBrush(shadow_color))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(center - radius + 3, center - radius + 3,
-                           radius * 2, radius * 2)
-
-        # Основной круг
-        painter.setBrush(QBrush(base_color))
-        painter.drawEllipse(center - radius, center - radius,
-                           radius * 2, radius * 2)
-
-        # Текст на виджете
-        if self._current_state == "ready":
-            painter.setPen(QPen(QColor(255, 255, 255), 2))
-            font = painter.font()
-            font.setBold(True)
-
-            has_vram = self._vram_mb > 0
-            vram_text = f"{self._vram_mb / 1024:.1f}G" if self._vram_mb >= 1024 else f"{self._vram_mb}M"
-
-            if self.translate_mode:
-                if has_vram:
-                    # EN + VRAM — две строки
-                    font.setPointSize(int(size * 0.13))
-                    painter.setFont(font)
-                    upper = self.rect().adjusted(0, -int(size * 0.08), 0, 0)
-                    painter.drawText(upper, Qt.AlignmentFlag.AlignCenter, "EN")
-
-                    font.setBold(False)
-                    font.setPointSize(int(size * 0.07))
-                    painter.setFont(font)
-                    painter.setPen(QPen(QColor(255, 255, 255, 180), 1))
-                    lower = self.rect().adjusted(0, int(size * 0.15), 0, 0)
-                    painter.drawText(lower, Qt.AlignmentFlag.AlignCenter, vram_text)
-                else:
-                    # Только EN
-                    font.setPointSize(int(size * 0.15))
-                    painter.setFont(font)
-                    painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "EN")
-            else:
-                label = self.dictation_model
-                if has_vram:
-                    # Модель + VRAM — две строки
-                    font.setPointSize(int(size * 0.07))
-                    painter.setFont(font)
-                    upper = self.rect().adjusted(0, -int(size * 0.08), 0, 0)
-                    painter.drawText(upper, Qt.AlignmentFlag.AlignCenter, label)
-
-                    font.setBold(False)
-                    font.setPointSize(int(size * 0.07))
-                    painter.setFont(font)
-                    painter.setPen(QPen(QColor(255, 255, 255, 180), 1))
-                    lower = self.rect().adjusted(0, int(size * 0.15), 0, 0)
-                    painter.drawText(lower, Qt.AlignmentFlag.AlignCenter, vram_text)
-                else:
-                    # Только метка модели
-                    font.setPointSize(int(size * 0.07))
-                    painter.setFont(font)
-                    painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, label)
+            if self._hover_opacity > 0.01:
+                self._draw_hover_info(painter, content_left, content_right, h)
 
         painter.end()
 
+    def _draw_avatar(self, painter: QPainter, x: int, y: int):
+        """Рисование круглого аватара с опциональным красным кольцом при записи."""
+        size = 24
+        center_x = x + size / 2
+        center_y = y + size / 2
+
+        if self._current_state == "recording":
+            glow_radius = size / 2 + 3
+            pulse = 0.3 + 0.7 * (0.5 + 0.5 * math.sin(self._animation_phase * 3))
+            glow_color = QColor(244, 67, 54, int(180 * pulse))
+            painter.setPen(QPen(glow_color, 2))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(QRectF(center_x - glow_radius, center_y - glow_radius,
+                                       glow_radius * 2, glow_radius * 2))
+
+        if self._avatar_pixmap is not None:
+            clip_path = QPainterPath()
+            clip_path.addEllipse(QRectF(x, y, size, size))
+            painter.setClipPath(clip_path)
+            painter.drawPixmap(x, y, self._avatar_pixmap)
+            painter.setClipping(False)
+        else:
+            painter.setBrush(QColor(80, 80, 80))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(x, y, size, size)
+
+    def _draw_waveform(self, painter: QPainter, left: int, right: int, h: int):
+        """Рисование waveform визуализации из RMS-уровней."""
+        levels = self._audio_levels
+        area_w = right - left
+        num_bars = 24
+        if not levels:
+            levels = [0.0] * num_bars
+
+        if len(levels) >= num_bars:
+            step = len(levels) / num_bars
+            bars = [levels[int(i * step)] for i in range(num_bars)]
+        else:
+            bars = levels + [0.0] * (num_bars - len(levels))
+
+        bar_width = max(2, (area_w - (num_bars - 1) * 2) // num_bars)
+        gap = 2
+        total_bars_w = num_bars * bar_width + (num_bars - 1) * gap
+        start_x = left + (area_w - total_bars_w) // 2
+
+        max_bar_h = h * 0.6
+        center_y = h / 2
+
+        for i, level in enumerate(bars):
+            norm = min(1.0, level * 5)
+            bar_h = max(2, norm * max_bar_h)
+
+            x = start_x + i * (bar_width + gap)
+            y = center_y - bar_h / 2
+
+            if norm < 0.5:
+                r = int(76 + (255 - 76) * norm * 2)
+                g = int(175 + (193 - 175) * norm * 2)
+                b = int(80 - 73 * norm * 2)
+            else:
+                r = int(255 - (255 - 244) * (norm - 0.5) * 2)
+                g = int(193 - (193 - 67) * (norm - 0.5) * 2)
+                b = int(7 + (54 - 7) * (norm - 0.5) * 2)
+
+            bar_color = QColor(r, g, b, 220)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(bar_color)
+            painter.drawRoundedRect(QRectF(x, y, bar_width, bar_h), 1, 1)
+
+    def _draw_processing(self, painter: QPainter, left: int, right: int, h: int):
+        """Рисование индикатора обработки — пульсирующие точки."""
+        num_dots = 5
+        dot_r = 3
+        spacing = 12
+        total_w = num_dots * dot_r * 2 + (num_dots - 1) * spacing
+        start_x = left + ((right - left) - total_w) // 2
+        center_y = h // 2
+
+        for i in range(num_dots):
+            phase = self._animation_phase - i * 0.5
+            scale = 0.5 + 0.5 * max(0, math.sin(phase))
+            r = int(dot_r * scale)
+            alpha = int(100 + 155 * scale)
+
+            x = start_x + i * (dot_r * 2 + spacing) + dot_r
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(255, 193, 7, alpha))
+            painter.drawEllipse(QRectF(x - r, center_y - r, r * 2, r * 2))
+
+    def _draw_hover_info(self, painter: QPainter, left: int, right: int, h: int):
+        """Рисование информации при hover: модель + горячая клавиша."""
+        opacity = self._hover_opacity
+        alpha = int(220 * opacity)
+
+        font = QFont("Segoe UI", 9)
+        painter.setFont(font)
+
+        model_text = self.dictation_model
+
+        painter.setPen(QPen(QColor(255, 255, 255, alpha), 1))
+        text_rect = QRectF(left, 0, right - left - 44, h)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, model_text)
+
+        # Бейдж горячей клавиши (справа)
+        hotkey = self._config.get('recognition', 'hotkey', default='f9').upper()
+        badge_font = QFont("Segoe UI", 7)
+        painter.setFont(badge_font)
+
+        fm = painter.fontMetrics()
+        text_w = fm.horizontalAdvance(hotkey) + 10
+        text_h = fm.height() + 4
+        badge_x = right - text_w - 2
+        badge_y = (h - text_h) // 2
+
+        badge_path = QPainterPath()
+        badge_path.addRoundedRect(QRectF(badge_x, badge_y, text_w, text_h), 4, 4)
+        painter.fillPath(badge_path, QColor(255, 255, 255, int(30 * opacity)))
+        painter.setPen(QPen(QColor(255, 255, 255, int(80 * opacity)), 1))
+        painter.drawPath(badge_path)
+
+        painter.setPen(QPen(QColor(255, 255, 255, alpha), 1))
+        painter.drawText(QRectF(badge_x, badge_y, text_w, text_h),
+                         Qt.AlignmentFlag.AlignCenter, hotkey)
+
     # --- Взаимодействие ---
+
+    def enterEvent(self, event):
+        """Курсор вошёл в область виджета."""
+        self._hovered = True
+
+    def leaveEvent(self, event):
+        """Курсор покинул область виджета."""
+        self._hovered = False
 
     def mousePressEvent(self, event):
         """Начало перетаскивания."""
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self._dragging = False
             event.accept()
 
     def mouseMoveEvent(self, event):
         """Перетаскивание."""
         if event.buttons() == Qt.MouseButton.LeftButton:
+            self._dragging = True
             self.move(event.globalPosition().toPoint() - self._drag_position)
             event.accept()
 
     def mouseReleaseEvent(self, event):
         """Конец перетаскивания."""
-        if event.button() == Qt.MouseButton.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton and self._dragging:
+            self._config.set('widget', 'auto_position', False)
             self._save_position()
+            self._config.save()
+            self._dragging = False
             event.accept()
 
     def contextMenuEvent(self, event):
-        """Контекстное меню — сигналы вместо прямых вызовов."""
+        """Контекстное меню."""
         menu = QMenu(self)
 
         settings_action = menu.addAction("Настройки...")
         settings_action.triggered.connect(lambda: self._bus.mode_changed.emit("open_settings", None))
 
-        translate_action = menu.addAction("✓ Перевод → EN" if self.translate_mode else "Перевод → EN")
-        translate_action.triggered.connect(lambda: self._bus.mode_changed.emit("translate_toggle", None))
-
         menu.addSeparator()
+
+        reset_pos_action = menu.addAction("Сбросить позицию")
+        reset_pos_action.triggered.connect(self._reset_position)
 
         minimize_action = menu.addAction("Свернуть в трей")
         minimize_action.triggered.connect(self._minimize_to_tray)

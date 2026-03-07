@@ -2,6 +2,7 @@
 
 import logging
 import threading
+import collections
 import numpy as np
 import sounddevice as sd
 
@@ -22,6 +23,10 @@ class AudioCapture:
         self._audio_data = []
         self._recording_event = threading.Event()
         self._lock = threading.Lock()
+
+        # RMS-буфер для real-time визуализации уровней звука
+        self._rms_buffer = collections.deque(maxlen=64)
+        self._rms_lock = threading.Lock()
 
         self._bus.recording_start.connect(self._on_start)
         self._bus.recording_stop.connect(self._on_stop)
@@ -49,6 +54,10 @@ class AudioCapture:
         if self._recording_event.is_set():
             with self._lock:
                 self._audio_data.append(indata.copy())
+            # RMS для визуализации waveform
+            rms = float(np.sqrt(np.mean(indata ** 2)))
+            with self._rms_lock:
+                self._rms_buffer.append(rms)
 
     def stop_recording(self):
         """Принудительная остановка записи (без обработки аудио)."""
@@ -57,10 +66,17 @@ class AudioCapture:
             self._audio_data = []
         log.info("recording force-stopped (data discarded)")
 
+    def get_audio_levels(self) -> list:
+        """Снапшот RMS-уровней для визуализации waveform."""
+        with self._rms_lock:
+            return list(self._rms_buffer)
+
     def _on_start(self, hwnd):
         """Начало записи."""
         with self._lock:
             self._audio_data = []
+        with self._rms_lock:
+            self._rms_buffer.clear()
         self._recording_event.set()
 
     def _on_stop(self):
@@ -76,19 +92,24 @@ class AudioCapture:
             gain = self._config.get('recognition', 'audio_gain', default=1.0)
             if gain != 1.0:
                 audio_np = audio_np * gain
+            peak_before = float(np.max(np.abs(audio_np)))
             audio_np = self._trim_silence(audio_np)
             if len(audio_np) < SAMPLE_RATE * 0.1:
                 log.warning("audio too short after trim: %d samples", len(audio_np))
                 self._bus.error_occurred.emit("AudioCapture", "Запись слишком короткая")
                 return
             audio_np = self._normalize(audio_np)
-            log.info("audio_ready: samples=%d duration=%.1fs", len(audio_np), len(audio_np) / SAMPLE_RATE)
+            peak_after = float(np.max(np.abs(audio_np)))
+            log.info("audio_ready: samples=%d duration=%.1fs peak=%.4f (raw=%.4f) gain=%.1f",
+                     len(audio_np), len(audio_np) / SAMPLE_RATE, peak_after, peak_before, gain)
+            if peak_before < 0.01:
+                log.warning("very quiet audio (peak=%.4f) — check microphone level", peak_before)
             self._bus.audio_ready.emit(audio_np)
         else:
             log.warning("no audio data recorded")
             self._bus.error_occurred.emit("AudioCapture", "Нет записанных данных")
 
-    def _trim_silence(self, audio, threshold=0.01, margin_samples=1600):
+    def _trim_silence(self, audio, threshold=0.005, margin_samples=3200):
         """Обрезать тишину в начале и конце аудио."""
         amplitude = np.abs(audio)
         above = np.where(amplitude > threshold)[0]

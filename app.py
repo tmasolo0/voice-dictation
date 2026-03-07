@@ -33,8 +33,8 @@ from core.output_pipeline import OutputPipeline
 from core.text_inserter import TextInserter
 from core.hotkeys import HotkeyManager
 from ui.widget import DictationWidget
+from core.audio_ducking import AudioDucker
 from ui.tray import TrayManager
-from ui.preview_popup import PreviewPopup
 
 
 MODEL_TURBO = 'large-v3-turbo'
@@ -54,32 +54,22 @@ class Application:
         self.pipeline = OutputPipeline(self.bus, config)
         self.inserter = TextInserter(self.bus, config)
         self.hotkeys = HotkeyManager(self.bus, config)
+        self.ducker = AudioDucker(self.bus, config)
 
         # UI
-        self.widget = DictationWidget(self.bus, config)
+        self.widget = DictationWidget(self.bus, config, self.audio)
         self.tray = TrayManager(self.bus, config, self.widget)
 
-        # Preview popup — перехватываем text_processed до TextInserter
-        self.bus.text_processed.disconnect(self.inserter._on_text_ready)
-        self.bus.text_processed.connect(self._on_text_processed)
-
-        self.preview_popup = PreviewPopup(self.widget)
-        self.preview_popup.insert_requested.connect(self._on_preview_insert)
-        self.preview_popup.cancel_requested.connect(self._on_preview_cancel)
-        self.preview_popup.redictate_requested.connect(self._on_redictate)
-        self._redictate_mode = False
-
         # Safety timeout — восстановление из зависшего PROCESSING
-        # НЕ применяется к RECORDING (пользователь сам контролирует длительность записи)
         self._safety_timer = QTimer()
         self._safety_timer.setSingleShot(True)
-        self._safety_timer.setInterval(30000)  # 30 секунд (whisper на длинных записях)
+        self._safety_timer.setInterval(30000)
         self._safety_timer.timeout.connect(self._on_safety_timeout)
 
         # Отдельный таймер для RECORDING — защита от «забытой» кнопки (2 минуты)
         self._recording_timeout = QTimer()
         self._recording_timeout.setSingleShot(True)
-        self._recording_timeout.setInterval(120000)  # 120 секунд
+        self._recording_timeout.setInterval(120000)
         self._recording_timeout.timeout.connect(self._on_recording_timeout)
 
         # State machine wiring
@@ -103,27 +93,21 @@ class Application:
 
     def start(self):
         """Запуск приложения."""
-        # Проверка наличия моделей
         from core.model_catalog import get_local_models
         if not get_local_models():
             self._prompt_download_models()
 
-        # Загрузка модели
         model_name = config.get('recognition', 'model', default=MODEL_TURBO)
         self.model_manager.load_model(model_name)
 
-        # Запуск сервисов
         self.audio.open_stream()
         self.hotkeys.start()
         self.widget.show()
 
-        # Startup info
         import ctypes
         version = get_version()
         hotkey = config.get('recognition', 'hotkey', default='f9')
         dictation_model = config.get('recognition', 'model', default=MODEL_TURBO)
-        preview_enabled = config.get('preview', 'enabled', default=False)
-        auto_delay = config.get('preview', 'auto_insert_delay', default=5)
         try:
             is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
         except Exception:
@@ -132,57 +116,9 @@ class Application:
             f"Voice Dictation v{version} | "
             f"Запись: {hotkey.upper()} | "
             f"Модель: {dictation_model} | "
-            f"Preview: {preview_enabled} (delay={auto_delay}s) | "
             f"Admin: {is_admin}"
         )
         log.info(banner)
-
-    def _on_text_processed(self, text: str):
-        """Координация preview popup: показать или вставить мгновенно."""
-        try:
-            log.info("on_text_processed: text_len=%d redictate=%s", len(text), self._redictate_mode)
-
-            if self._redictate_mode:
-                self._redictate_mode = False
-                auto_delay = config.get('preview', 'auto_insert_delay', default=5)
-                self.preview_popup.update_text(text)
-                if auto_delay > 0:
-                    self.preview_popup.restart_timer(auto_delay)
-                log.info("on_text_processed: redictate mode, updating preview")
-                return
-
-            preview_enabled = config.get('preview', 'enabled', default=False)
-            auto_delay = config.get('preview', 'auto_insert_delay', default=5)
-
-            if not preview_enabled or auto_delay == 0:
-                log.info("on_text_processed: direct insert (preview=%s delay=%d)",
-                         preview_enabled, auto_delay)
-                self.inserter._on_text_ready(text)
-                return
-
-            log.info("on_text_processed: showing preview (delay=%d)", auto_delay)
-            self.preview_popup.show_preview(text, auto_delay)
-        except Exception as e:
-            log.exception("on_text_processed ERROR: %s", e)
-            self.bus.error_occurred.emit("Application", str(e))
-
-    def _on_preview_insert(self, text: str):
-        """Вставка текста из preview popup (возможно отредактированного)."""
-        log.info("on_preview_insert: text_len=%d", len(text))
-        self._redictate_mode = False
-        self.inserter._on_text_ready(text)
-
-    def _on_preview_cancel(self):
-        """Отмена вставки из preview popup."""
-        self._redictate_mode = False
-        self.state_machine.transition(AppState.READY)
-
-    def _on_redictate(self):
-        """Re-dictate: остановить таймер, перейти в режим ожидания записи."""
-        self._redictate_mode = True
-        self.preview_popup.stop_timer()
-        self.preview_popup.set_waiting_state()
-        self.state_machine.transition(AppState.READY)
 
     def _on_error(self, component, message):
         """Обработка ошибок — логирование и восстановление в READY."""
@@ -200,7 +136,6 @@ class Application:
         log.debug("state_changed: %s -> hotkeys_enabled=%s", state_name, enabled)
         self.hotkeys.set_enabled(enabled)
 
-        # Safety timers: раздельное управление для RECORDING и PROCESSING
         if state_name == "ready":
             self._safety_timer.stop()
             self._recording_timeout.stop()
@@ -216,7 +151,6 @@ class Application:
         current = self.state_machine.state
         if current == AppState.PROCESSING:
             log.error("SAFETY TIMEOUT: stuck in PROCESSING for 30s — forcing READY")
-            # Сброс busy-флага распознавателя, чтобы следующая попытка не была отклонена
             with self.recognizer._busy_lock:
                 if self.recognizer._busy:
                     log.warning("SAFETY TIMEOUT: resetting recognizer._busy")
@@ -224,7 +158,7 @@ class Application:
             self.state_machine.transition(AppState.READY)
 
     def _on_recording_timeout(self):
-        """Защита от забытой записи (> 120с). Останавливаем аудиозахват и возвращаем READY."""
+        """Защита от забытой записи (> 120с)."""
         current = self.state_machine.state
         if current == AppState.RECORDING:
             log.error("RECORDING TIMEOUT: recording for 120s — stopping")
@@ -247,34 +181,25 @@ class Application:
         """Открыть диалог настроек с hot-apply логикой."""
         from ui.settings_dialog import SettingsDialog
 
-        # Отключить hotkeys на время модального диалога
         self.hotkeys.set_enabled(False)
 
-        # Снапшот для сравнения
         old_hotkey = config.get('recognition', 'hotkey', default='f9')
-        old_size = config.get('widget', 'size', default=100)
         old_model = config.get('recognition', 'model', default=MODEL_TURBO)
 
         dialog = SettingsDialog(config, parent=self.widget)
         result = dialog.exec()
 
-        # Вернуть hotkeys
         self.hotkeys.set_enabled(True)
 
         if result == dialog.DialogCode.Accepted:
-            # Hot-apply: горячие клавиши
             new_hotkey = config.get('recognition', 'hotkey', default='f9')
             if new_hotkey != old_hotkey:
                 log.info("settings: hotkey changed '%s' -> '%s'", old_hotkey, new_hotkey)
                 self.hotkeys.update_hotkey(new_hotkey)
 
-            # Hot-apply: размер виджета
-            new_size = config.get('widget', 'size', default=100)
-            if new_size != old_size:
-                self.widget.setFixedSize(new_size, new_size)
-                self.widget.update()
+            self.widget.dictation_model = config.get('recognition', 'model', default=MODEL_TURBO)
+            self.widget.update()
 
-            # Hot-apply: смена модели (горячая перезагрузка)
             new_model = config.get('recognition', 'model', default=MODEL_TURBO)
             if new_model != old_model:
                 log.info("settings: model changed '%s' -> '%s'", old_model, new_model)

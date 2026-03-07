@@ -20,7 +20,6 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
-    QSlider,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -73,9 +72,16 @@ _QT_KEY_MAP = {
     Qt.Key.Key_Menu: "menu",
 }
 
-# Modifier-only keys (ignored as standalone)
+# Modifier keys — теперь поддерживаются как самостоятельные (Left/Right через scan code)
 _MODIFIER_KEYS = {
     Qt.Key.Key_Control, Qt.Key.Key_Shift, Qt.Key.Key_Alt, Qt.Key.Key_Meta,
+}
+
+# Native scan code -> modifier-only hotkey string
+_SCAN_TO_MODIFIER = {
+    0x1D: "left ctrl",   0x11D: "right ctrl",
+    0x2A: "left shift",  0x36: "right shift",
+    0x38: "left alt",    0x138: "right alt",
 }
 
 
@@ -113,8 +119,16 @@ class HotkeyEdit(QLineEdit):
 
         key = event.key()
 
-        # Ignore standalone modifier presses
+        # Modifier-only: определить Left/Right через native scan code
         if key in _MODIFIER_KEYS:
+            scan = event.nativeScanCode()
+            mod_name = _SCAN_TO_MODIFIER.get(scan)
+            if mod_name is None:
+                return
+            self._hotkey = mod_name
+            self._recording = False
+            self.setText(mod_name)
+            self.clearFocus()
             return
 
         key_str = _QT_KEY_MAP.get(Qt.Key(key))
@@ -136,6 +150,7 @@ class HotkeyEdit(QLineEdit):
         self._recording = False
         self.setText(combo)
         self.clearFocus()
+
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +205,6 @@ class SettingsDialog(QDialog):
 
         self._build_tab_general()
         self._build_tab_recognition()
-        self._build_tab_widget()
         self._build_tab_postprocessing()
         self._build_tab_dictionary()
         self._build_tab_models()
@@ -227,20 +241,6 @@ class SettingsDialog(QDialog):
         self._start_minimized_check = QCheckBox("Запуск в свёрнутом виде")
         form.addRow(self._start_minimized_check)
 
-        self._preview_enabled_check = QCheckBox("Показывать превью перед вставкой")
-        form.addRow(self._preview_enabled_check)
-
-        self._auto_insert_delay_spin = QSpinBox()
-        self._auto_insert_delay_spin.setRange(0, 30)
-        self._auto_insert_delay_spin.setSuffix(" сек")
-        delay_layout = QHBoxLayout()
-        delay_layout.addWidget(self._auto_insert_delay_spin)
-        delay_hint = QLabel("0 = мгновенная вставка")
-        delay_hint.setStyleSheet("color: gray;")
-        delay_layout.addWidget(delay_hint)
-        delay_layout.addStretch()
-        form.addRow("Задержка авто-вставки:", delay_layout)
-
         self._audio_gain_spin = QDoubleSpinBox()
         self._audio_gain_spin.setRange(0.1, 5.0)
         self._audio_gain_spin.setSingleStep(0.1)
@@ -252,6 +252,12 @@ class SettingsDialog(QDialog):
         gain_layout.addWidget(gain_hint)
         gain_layout.addStretch()
         form.addRow("Усиление микрофона:", gain_layout)
+
+        self._sound_effects_check = QCheckBox("Звуковые эффекты при записи")
+        form.addRow(self._sound_effects_check)
+
+        self._audio_ducking_check = QCheckBox("Приглушать звук при записи")
+        form.addRow(self._audio_ducking_check)
 
         self._tabs.addTab(tab, "Основные")
 
@@ -298,13 +304,6 @@ class SettingsDialog(QDialog):
         self._beam_size_spin.setRange(1, 10)
         qf.addRow("Ширина поиска (beam):", self._beam_size_spin)
         qf.addRow("", QLabel("Ширина beam search (больше = точнее, медленнее)"))
-
-        self._temperature_spin = QDoubleSpinBox()
-        self._temperature_spin.setRange(0.0, 1.0)
-        self._temperature_spin.setSingleStep(0.1)
-        self._temperature_spin.setDecimals(1)
-        qf.addRow("Температура:", self._temperature_spin)
-        qf.addRow("", QLabel("Температура сэмплирования (0 = жадный декодинг)"))
 
         self._condition_prev_check = QCheckBox("Использовать предыдущий сегмент как контекст")
         qf.addRow("", self._condition_prev_check)
@@ -376,29 +375,7 @@ class SettingsDialog(QDialog):
 
         self._tabs.addTab(tab, "Распознавание")
 
-    # -- Tab 3: Widget ----------------------------------------------------
-
-    def _build_tab_widget(self):
-        tab = QWidget()
-        form = QFormLayout(tab)
-
-        slider_layout = QHBoxLayout()
-        self._size_slider = QSlider(Qt.Orientation.Horizontal)
-        self._size_slider.setRange(50, 300)
-        self._size_label = QLabel("150")
-        self._size_slider.valueChanged.connect(
-            lambda v: self._size_label.setText(str(v))
-        )
-        slider_layout.addWidget(self._size_slider)
-        slider_layout.addWidget(self._size_label)
-        form.addRow("Размер круга (пикселей):", slider_layout)
-
-        self._hide_fullscreen_check = QCheckBox("Скрывать в полноэкранных приложениях")
-        form.addRow(self._hide_fullscreen_check)
-
-        self._tabs.addTab(tab, "Виджет")
-
-    # -- Tab 4: Post-processing -------------------------------------------
+    # -- Tab 3: Post-processing -------------------------------------------
 
     def _build_tab_postprocessing(self):
         tab = QWidget()
@@ -574,9 +551,9 @@ class SettingsDialog(QDialog):
 
         self._autostart_check.setChecked(c.get("system", "autostart", default=False))
         self._start_minimized_check.setChecked(c.get("system", "start_minimized", default=False))
-        self._preview_enabled_check.setChecked(c.get("preview", "enabled", default=False))
-        self._auto_insert_delay_spin.setValue(c.get("preview", "auto_insert_delay", default=5))
         self._audio_gain_spin.setValue(c.get("recognition", "audio_gain", default=1.0))
+        self._sound_effects_check.setChecked(c.get("widget", "sound_effects", default=True))
+        self._audio_ducking_check.setChecked(c.get("widget", "audio_ducking", default=True))
 
         # Recognition
         model = c.get("recognition", "model", default="large-v3-turbo")
@@ -595,7 +572,6 @@ class SettingsDialog(QDialog):
             self._compute_combo.setCurrentIndex(idx)
 
         self._beam_size_spin.setValue(c.get("recognition", "beam_size", default=5))
-        self._temperature_spin.setValue(c.get("recognition", "temperature", default=0.3))
         self._condition_prev_check.setChecked(c.get("recognition", "condition_on_previous_text", default=False))
         self._compression_spin.setValue(c.get("recognition", "compression_ratio_threshold", default=2.4))
         self._log_prob_spin.setValue(c.get("recognition", "log_prob_threshold", default=-1.0))
@@ -608,11 +584,6 @@ class SettingsDialog(QDialog):
         self._vad_threshold_spin.setValue(c.get("vad", "threshold", default=0.5))
         self._vad_min_speech_spin.setValue(c.get("vad", "min_speech_ms", default=250))
         self._vad_min_silence_spin.setValue(c.get("vad", "min_silence_ms", default=500))
-
-        # Widget
-        self._size_slider.setValue(c.get("widget", "size", default=150))
-        self._size_label.setText(str(self._size_slider.value()))
-        self._hide_fullscreen_check.setChecked(c.get("widget", "hide_in_fullscreen", default=True))
 
         # Post-processing
         self._punct_check.setChecked(c.get("postprocessing", "punctuation", default=True))
@@ -630,16 +601,15 @@ class SettingsDialog(QDialog):
         vals["recognition.language"] = self._language_combo.currentData()
         vals["system.autostart"] = self._autostart_check.isChecked()
         vals["system.start_minimized"] = self._start_minimized_check.isChecked()
-        vals["preview.enabled"] = self._preview_enabled_check.isChecked()
-        vals["preview.auto_insert_delay"] = self._auto_insert_delay_spin.value()
         vals["recognition.audio_gain"] = self._audio_gain_spin.value()
+        vals["widget.sound_effects"] = self._sound_effects_check.isChecked()
+        vals["widget.audio_ducking"] = self._audio_ducking_check.isChecked()
 
         # Recognition
         vals["recognition.model"] = self._model_combo.currentData()
         vals["recognition.device"] = self._device_combo.currentData()
         vals["recognition.compute_type"] = self._compute_combo.currentData()
         vals["recognition.beam_size"] = self._beam_size_spin.value()
-        vals["recognition.temperature"] = self._temperature_spin.value()
         vals["recognition.condition_on_previous_text"] = self._condition_prev_check.isChecked()
         vals["recognition.compression_ratio_threshold"] = self._compression_spin.value()
         vals["recognition.log_prob_threshold"] = self._log_prob_spin.value()
@@ -652,10 +622,6 @@ class SettingsDialog(QDialog):
         vals["vad.threshold"] = self._vad_threshold_spin.value()
         vals["vad.min_speech_ms"] = self._vad_min_speech_spin.value()
         vals["vad.min_silence_ms"] = self._vad_min_silence_spin.value()
-
-        # Widget
-        vals["widget.size"] = self._size_slider.value()
-        vals["widget.hide_in_fullscreen"] = self._hide_fullscreen_check.isChecked()
 
         # Post-processing
         vals["postprocessing.punctuation"] = self._punct_check.isChecked()
@@ -767,10 +733,8 @@ class SettingsDialog(QDialog):
         elif idx == 1:
             self._reset_recognition(defaults)
         elif idx == 2:
-            self._reset_widget(defaults)
-        elif idx == 3:
             self._reset_postprocessing(defaults)
-        elif idx == 4:
+        elif idx == 3:
             self._reset_dictionary(defaults)
 
     # ======================================================================
@@ -785,9 +749,9 @@ class SettingsDialog(QDialog):
 
         self._autostart_check.setChecked(d["system"]["autostart"])
         self._start_minimized_check.setChecked(d["system"]["start_minimized"])
-        self._preview_enabled_check.setChecked(d["preview"]["enabled"])
-        self._auto_insert_delay_spin.setValue(d["preview"]["auto_insert_delay"])
         self._audio_gain_spin.setValue(d["recognition"]["audio_gain"])
+        self._sound_effects_check.setChecked(d["widget"]["sound_effects"])
+        self._audio_ducking_check.setChecked(d["widget"]["audio_ducking"])
 
     def _reset_recognition(self, d: dict):
         model = d["recognition"]["model"]
@@ -804,7 +768,6 @@ class SettingsDialog(QDialog):
             self._compute_combo.setCurrentIndex(idx)
 
         self._beam_size_spin.setValue(d["recognition"]["beam_size"])
-        self._temperature_spin.setValue(d["recognition"]["temperature"])
         self._condition_prev_check.setChecked(d["recognition"]["condition_on_previous_text"])
         self._compression_spin.setValue(d["recognition"]["compression_ratio_threshold"])
         self._log_prob_spin.setValue(d["recognition"]["log_prob_threshold"])
@@ -816,10 +779,6 @@ class SettingsDialog(QDialog):
         self._vad_threshold_spin.setValue(d["vad"]["threshold"])
         self._vad_min_speech_spin.setValue(d["vad"]["min_speech_ms"])
         self._vad_min_silence_spin.setValue(d["vad"]["min_silence_ms"])
-
-    def _reset_widget(self, d: dict):
-        self._size_slider.setValue(d["widget"]["size"])
-        self._hide_fullscreen_check.setChecked(d["widget"]["hide_in_fullscreen"])
 
     def _reset_postprocessing(self, d: dict):
         self._punct_check.setChecked(d["postprocessing"]["punctuation"])

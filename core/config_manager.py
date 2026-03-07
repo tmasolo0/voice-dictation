@@ -22,14 +22,19 @@ CONFIG_FILE = APP_DIR / "config.json"
 DICTIONARY_FILE = BUNDLE_DIR / "dictionary.txt"
 DICTIONARIES_DIR = BUNDLE_DIR / "dictionaries"
 REPLACEMENTS_FILE = APP_DIR / "replacements.json"
-CONFIG_VERSION = 10
+CONFIG_VERSION = 14
 
 DEFAULT_CONFIG = {
     "version": CONFIG_VERSION,
     "widget": {
         "position": {"x": None, "y": None},
+        "auto_position": True,
+        "bar_width": 200,
+        "bar_height": 36,
         "size": 150,
-        "hide_in_fullscreen": True
+        "sound_effects": True,
+        "audio_ducking": True,
+        "duck_level": 0.15
     },
     "recognition": {
         "hotkey": "f9",
@@ -41,7 +46,7 @@ DEFAULT_CONFIG = {
         "use_hotwords": True,                    # Использовать hotwords из словарей (может вызывать галлюцинации)
         # --- Параметры качества транскрипции ---
         "beam_size": 5,                         # Ширина beam search (больше = точнее, медленнее)
-        "temperature": 0.3,                     # Температура сэмплирования (0 = жадный декодинг)
+        "temperature": [0.0, 0.2, 0.4, 0.6, 0.8, 1.0],  # Temperature fallback (начинает с greedy, повышает при плохих метриках)
         "condition_on_previous_text": False,     # Контекст предыдущего сегмента (False для push-to-talk)
         "compression_ratio_threshold": 2.4,     # Порог сжатия — фильтр повторяющегося текста
         "log_prob_threshold": -1.0,             # Порог логарифма вероятности — фильтр низкой уверенности
@@ -50,13 +55,8 @@ DEFAULT_CONFIG = {
         "no_repeat_ngram_size": 3,              # Запрет повтора N-грамм подряд
         "suppress_tokens": [-1],                # Подавление не-речевых токенов (-1 = дефолтный набор)
         "hallucination_silence_threshold": 2.0, # Фильтр галлюцинаций на тишине (секунды)
-        "translate_hotkey": "f10",
-        "history_hotkey": "ctrl+h",
         "vram_cleanup_interval": 10,
         "audio_gain": 1.0
-    },
-    "dictation": {
-        "translate_to_english": False
     },
     "vad": {
         "threshold": 0.5,
@@ -66,17 +66,10 @@ DEFAULT_CONFIG = {
     "dictionaries": {
         "active": ["it"]
     },
-    "preview": {
-        "enabled": False,
-        "auto_insert_delay": 5
-    },
     "postprocessing": {
         "punctuation": True,
         "capitalization": True,
         "trailing_dot": True
-    },
-    "history": {
-        "history_retention_days": 30
     },
     "system": {
         "autostart": False,
@@ -135,10 +128,31 @@ class ConfigManager:
             self.save()
             print(f"Конфиг мигрирован на версию {CONFIG_VERSION}")
         elif self._config["version"] < CONFIG_VERSION:
-            # v1/v2 -> v3: deep merge — добавляет недостающие ключи
+            old_version = self._config["version"]
             user_overrides = self._config
             self._config = copy.deepcopy(DEFAULT_CONFIG)
             self._deep_update(self._config, user_overrides)
+            # v11 → v12: temperature скаляр → список, невалидный hotkey → f9
+            if old_version < 12:
+                temp = self._config.get("recognition", {}).get("temperature")
+                if isinstance(temp, (int, float)):
+                    self._config["recognition"]["temperature"] = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+                _STANDALONE_MODS = {"ctrl", "shift", "alt", "win"}
+                for hk_key in ("hotkey",):
+                    val = self._config.get("recognition", {}).get(hk_key, "")
+                    if val in _STANDALONE_MODS:
+                        default_val = DEFAULT_CONFIG["recognition"].get(hk_key, "f9")
+                        self._config["recognition"][hk_key] = default_val
+                        print(f"Миграция: hotkey '{hk_key}' сброшен с '{val}' на '{default_val}'")
+            # v12 → v13: удалены translate, history, preview, hide_in_fullscreen; компактный виджет
+            if old_version < 13:
+                rec = self._config.get("recognition", {})
+                for k in ("translate_hotkey", "history_hotkey"):
+                    rec.pop(k, None)
+                self._config.pop("dictation", None)
+                self._config.pop("preview", None)
+                self._config.pop("history", None)
+                self._config.get("widget", {}).pop("hide_in_fullscreen", None)
             self._config["version"] = CONFIG_VERSION
             self.save()
             print(f"Конфиг мигрирован на версию {CONFIG_VERSION}")

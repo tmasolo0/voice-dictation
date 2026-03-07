@@ -104,7 +104,7 @@ def _unicode_input(scan_code, flags=0):
     return inp
 
 
-# ── Публичные утилиты для переиспользования (history_dialog и др.) ──
+# ── Публичные утилиты ──
 
 def detect_window_type(hwnd):
     """Определить тип окна: 'terminal', 'electron' или 'normal'."""
@@ -442,13 +442,21 @@ def _restore_clipboard_delayed(old_clipboard):
     threading.Timer(2.0, _restore).start()
 
 
+# Символы, перед которыми не нужен пробел (пунктуация в начале текста)
+_PUNCTUATION_START = set('.,;:!?)}]>»"\'')
+
+
 class TextInserter:
     """Захват целевого окна и вставка текста (гибридная стратегия)."""
+
+    # Окно времени (с), в течение которого считаем, что пользователь продолжает диктовку
+    _SMART_SPACING_WINDOW = 60.0
 
     def __init__(self, event_bus, config):
         self._bus = event_bus
         self._config = config
         self._target_window = None
+        self._last_insert_time = 0.0
 
         self._bus.recording_start.connect(self._capture_window)
         self._bus.text_processed.connect(self._on_text_ready)
@@ -498,8 +506,17 @@ class TextInserter:
             fg_title = win32gui.GetWindowText(fg) if fg else "<None>"
             log.debug("insert: foreground=%s title='%s'", fg, fg_title)
 
-            # Шаг 2: Гибридная вставка
+            # Шаг 2: Smart spacing — пробел если продолжаем диктовку
+            now = time.monotonic()
+            if text and text[0] not in _PUNCTUATION_START:
+                elapsed = now - self._last_insert_time
+                if self._last_insert_time > 0 and elapsed < self._SMART_SPACING_WINDOW:
+                    text = " " + text
+                    log.info("smart_spacing: prepended space (last insert %.1fs ago)", elapsed)
+
+            # Шаг 3: Гибридная вставка
             insert_text(text, hwnd)
+            self._last_insert_time = time.monotonic()
 
             self._bus.text_inserted.emit()
 

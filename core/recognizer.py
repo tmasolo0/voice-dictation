@@ -3,6 +3,7 @@
 import gc
 import logging
 import re
+import sys
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -12,13 +13,31 @@ log = logging.getLogger(__name__)
 _HALLUCINATION_RE = [
     re.compile(r'(.{8,}?)\1{2,}'),  # одна и та же фраза 3+ раз подряд
     re.compile(r'^\s*[.…♪♫«»\-\s]+\s*$'),  # только пунктуация/символы
-    re.compile(r'(?i)thank you for watching|thanks for watching|please subscribe'
-               r'|подписывайтесь на канал|субтитры сделал|субтитры выполнены'),
+]
+
+# Одиночные слова-галлюцинации (весь текст = одно слово из этого набора)
+_HALLUCINATION_WORDS = {
+    "you", "i", "so", "uh", "um", "hmm", "huh", "ah", "oh",
+    "bye", "goodbye", "hey", "the", "a", "is", "it", "and",
+    "да", "нет", "ну", "а", "и", "о", "э",
+}
+
+# Фразы-галлюцинации (проверяются в коротких текстах <40 символов)
+_HALLUCINATION_PHRASES = [
+    "thanks for watching", "thank you for watching",
+    "thanks for listening", "thank you for listening",
+    "please subscribe", "like and subscribe",
+    "see you next time", "the end",
+    "silence", "no speech", "inaudible",
+    "[music]", "(music)", "[applause]", "[laughter]",
+    "субтитры сделал", "субтитры выполнены",
+    "подписывайтесь на канал", "спасибо за просмотр",
+    "продолжение следует",
 ]
 
 
 class Recognizer:
-    """Транскрипция аудио через faster-whisper, с поддержкой режима перевода."""
+    """Транскрипция аудио через faster-whisper."""
 
     def __init__(self, event_bus, model_manager, config):
         self._bus = event_bus
@@ -59,8 +78,8 @@ class Recognizer:
                 return
 
             start = time.time()
-            translate_mode = self._config.get('dictation', 'translate_to_english', default=False)
             beam_size = self._config.get('recognition', 'beam_size', default=5)
+            temperature = self._config.get('recognition', 'temperature', default=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
             use_hotwords = self._config.get('recognition', 'use_hotwords', default=True)
             hotwords = self._config.get_hotwords() if use_hotwords else ""
 
@@ -69,47 +88,34 @@ class Recognizer:
                 language = None
             initial_prompt = self._config.get('recognition', 'initial_prompt', default='') or None
 
+            log.info("transcribe_params: lang=%s temperature=%s beam=%d model=%s frozen=%s",
+                     language, temperature, beam_size,
+                     self._models.model_name, getattr(sys, 'frozen', False))
+
             vad_params = {
                 'threshold': self._config.get('vad', 'threshold', default=0.5),
                 'min_speech_duration_ms': self._config.get('vad', 'min_speech_ms', default=250),
                 'min_silence_duration_ms': self._config.get('vad', 'min_silence_ms', default=500),
             }
 
-            if translate_mode:
-                segments, info = model.transcribe(
-                    audio_data,
-                    language=language,
-                    task="translate",
-                    vad_filter=True,
-                    vad_parameters=vad_params,
-                    initial_prompt=initial_prompt,
-                    hotwords=hotwords or None,
-                    condition_on_previous_text=self._config.get('recognition', 'condition_on_previous_text', default=False),
-                    beam_size=beam_size,
-                    repetition_penalty=self._config.get('recognition', 'repetition_penalty', default=1.2),
-                    no_repeat_ngram_size=self._config.get('recognition', 'no_repeat_ngram_size', default=3),
-                    suppress_tokens=self._config.get('recognition', 'suppress_tokens', default=[-1]),
-                    hallucination_silence_threshold=self._config.get('recognition', 'hallucination_silence_threshold', default=2.0),
-                )
-            else:
-                segments, info = model.transcribe(
-                    audio_data,
-                    language=language,
-                    vad_filter=True,
-                    vad_parameters=vad_params,
-                    initial_prompt=initial_prompt,
-                    hotwords=hotwords or None,
-                    condition_on_previous_text=self._config.get('recognition', 'condition_on_previous_text', default=False),
-                    beam_size=beam_size,
-                    temperature=self._config.get('recognition', 'temperature', default=0.3),
-                    compression_ratio_threshold=self._config.get('recognition', 'compression_ratio_threshold', default=2.4),
-                    log_prob_threshold=self._config.get('recognition', 'log_prob_threshold', default=-1.0),
-                    no_speech_threshold=self._config.get('recognition', 'no_speech_threshold', default=0.6),
-                    repetition_penalty=self._config.get('recognition', 'repetition_penalty', default=1.2),
-                    no_repeat_ngram_size=self._config.get('recognition', 'no_repeat_ngram_size', default=3),
-                    suppress_tokens=self._config.get('recognition', 'suppress_tokens', default=[-1]),
-                    hallucination_silence_threshold=self._config.get('recognition', 'hallucination_silence_threshold', default=2.0),
-                )
+            segments, info = model.transcribe(
+                audio_data,
+                language=language,
+                vad_filter=True,
+                vad_parameters=vad_params,
+                initial_prompt=initial_prompt,
+                hotwords=hotwords or None,
+                condition_on_previous_text=self._config.get('recognition', 'condition_on_previous_text', default=False),
+                beam_size=beam_size,
+                temperature=temperature,
+                compression_ratio_threshold=self._config.get('recognition', 'compression_ratio_threshold', default=2.4),
+                log_prob_threshold=self._config.get('recognition', 'log_prob_threshold', default=-1.0),
+                no_speech_threshold=self._config.get('recognition', 'no_speech_threshold', default=0.6),
+                repetition_penalty=self._config.get('recognition', 'repetition_penalty', default=1.2),
+                no_repeat_ngram_size=self._config.get('recognition', 'no_repeat_ngram_size', default=3),
+                suppress_tokens=self._config.get('recognition', 'suppress_tokens', default=[-1]),
+                hallucination_silence_threshold=self._config.get('recognition', 'hallucination_silence_threshold', default=2.0),
+            )
 
             # Фильтрация сегментов по качеству (защита от галлюцинаций)
             no_speech_thr = self._config.get('recognition', 'no_speech_threshold', default=0.6)
@@ -143,7 +149,6 @@ class Recognizer:
                 'language': info.language,
                 'language_probability': info.language_probability,
                 'elapsed': elapsed,
-                'translate_mode': translate_mode,
             }
 
             # Очистка ссылок на результаты transcribe
@@ -177,8 +182,18 @@ class Recognizer:
     def _is_hallucination(self, text):
         """Детекция типичных шаблонов галлюцинаций Whisper."""
         stripped = text.strip()
-        if len(stripped) <= 1:
+        if len(stripped) < 3:
             return True
+        lower = stripped.lower()
+        # Одиночное слово-галлюцинация
+        if lower in _HALLUCINATION_WORDS:
+            return True
+        # Короткий текст — проверяем фразы-галлюцинации
+        if len(stripped) < 40:
+            for phrase in _HALLUCINATION_PHRASES:
+                if phrase in lower:
+                    return True
+        # Regex-паттерны (повторы, мусор)
         for pattern in _HALLUCINATION_RE:
             if pattern.search(stripped):
                 return True

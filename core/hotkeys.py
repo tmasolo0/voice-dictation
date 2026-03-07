@@ -27,17 +27,31 @@ _VK = {
 }
 _MOD = {'ctrl': 0x0002, 'alt': 0x0001, 'shift': 0x0004, 'win': 0x0008}
 
+# Modifier-only virtual key codes (Left/Right variants)
+_MODIFIER_VK = {
+    "left ctrl": 0xA2,  "right ctrl": 0xA3,
+    "left shift": 0xA0, "right shift": 0xA1,
+    "left alt": 0xA4,   "right alt": 0xA5,
+}
+
 _MOD_NOREPEAT = 0x4000
 _WM_HOTKEY = 0x0312
 _WM_APP_UPDATE = 0x8001  # custom: re-register a hotkey
 _WM_APP_QUIT = 0x8002    # custom: exit message loop
 
 _ID_RECORD = 1
-_ID_HISTORY = 3
+
+
+def _is_modifier_hotkey(hotkey_str):
+    """Проверка, является ли hotkey модификатором (left ctrl, right shift, etc.)."""
+    return hotkey_str in _MODIFIER_VK
 
 
 def _parse_hotkey(hotkey_str):
-    """'ctrl+h' → (mod_flags, vk_code)."""
+    """'ctrl+h' → (mod_flags, vk_code). Для modifier-only: (0, vk_code)."""
+    if hotkey_str in _MODIFIER_VK:
+        return 0, _MODIFIER_VK[hotkey_str]
+
     parts = [p.strip().lower() for p in hotkey_str.split('+')]
     key, mods = parts[-1], parts[:-1]
 
@@ -88,22 +102,26 @@ class HotkeyManager:
         if self._enabled != enabled:
             log.debug("set_enabled: %s", enabled)
         self._enabled = enabled
-        # Safety: при возврате в READY сбросить _recording, чтобы не застрять навсегда
         if enabled and self._recording:
             log.warning("set_enabled: forcing _recording=False (was stuck)")
             self._recording = False
 
     def update_hotkey(self, hotkey: str):
-        """Обновить горячую клавишу записи без перезапуска."""
+        """Обновить горячую клавишу записи."""
+        old_is_mod = _is_modifier_hotkey(self._hotkey)
+        new_is_mod = _is_modifier_hotkey(hotkey)
+
         log.info("update_hotkey: record '%s' -> '%s'", self._hotkey, hotkey)
         self._hotkey = hotkey
-        self._request_update(_ID_RECORD, hotkey)
 
-    def update_history_hotkey(self, hotkey: str):
-        """Обновить горячую клавишу истории без перезапуска."""
-        log.info("update_hotkey: history '%s' -> '%s'", self._history_hotkey, hotkey)
-        self._history_hotkey = hotkey
-        self._request_update(_ID_HISTORY, hotkey)
+        # Если тип менялся (modifier ↔ обычная), перезапуск потока
+        if old_is_mod != new_is_mod:
+            log.info("update_hotkey: mode switch, restarting listener")
+            self.stop()
+            time.sleep(0.1)
+            self.start()
+        else:
+            self._request_update(_ID_RECORD, hotkey)
 
     def _request_update(self, hotkey_id, hotkey_str):
         if self._thread_id:
@@ -115,13 +133,19 @@ class HotkeyManager:
     def _listener(self):
         self._thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
 
-        # Форсируем создание очереди сообщений потока (без неё RegisterHotKey fails)
+        # Форсируем создание очереди сообщений потока
         msg_init = ctypes.wintypes.MSG()
         user32.PeekMessageW(ctypes.byref(msg_init), None, 0, 0, 0)
 
-        self._register(_ID_RECORD, self._hotkey)
+        if _is_modifier_hotkey(self._hotkey):
+            self._poll_loop()
+        else:
+            self._msg_loop()
 
-        log.info("RegisterHotKey started: record=%s", self._hotkey)
+    def _msg_loop(self):
+        """GetMessageW цикл для обычных клавиш (RegisterHotKey)."""
+        self._register(_ID_RECORD, self._hotkey)
+        log.info("msg_loop started: record=%s", self._hotkey)
 
         msg = ctypes.wintypes.MSG()
         while self._running:
@@ -129,16 +153,48 @@ class HotkeyManager:
             if ret <= 0:
                 break
             if msg.message == _WM_HOTKEY:
-                self._on_hotkey(msg.wParam)
+                self._on_hotkey(_ID_RECORD)
             elif msg.message == _WM_APP_UPDATE:
-                self._process_updates()
+                self._process_updates_msg()
             elif msg.message == _WM_APP_QUIT:
                 break
 
         user32.UnregisterHotKey(None, _ID_RECORD)
-        log.info("RegisterHotKey stopped")
+        log.info("msg_loop stopped")
+
+    def _poll_loop(self):
+        """GetAsyncKeyState polling для modifier-only клавиш."""
+        vk = _MODIFIER_VK.get(self._hotkey, 0)
+        log.info("poll_loop started: record=%s vk=0x%02X", self._hotkey, vk)
+
+        was_pressed = False
+        msg = ctypes.wintypes.MSG()
+
+        while self._running:
+            # Обработка Windows-сообщений (UPDATE / QUIT)
+            while user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1):  # PM_REMOVE=1
+                if msg.message == _WM_APP_UPDATE:
+                    self._process_updates_poll()
+                    vk = _MODIFIER_VK.get(self._hotkey, 0)
+                elif msg.message == _WM_APP_QUIT:
+                    log.info("poll_loop stopped")
+                    return
+
+            pressed = bool(user32.GetAsyncKeyState(vk) & 0x8000)
+
+            if pressed and not was_pressed:
+                # Нажатие
+                self._on_hotkey(_ID_RECORD)
+            was_pressed = pressed
+
+            time.sleep(0.015)  # ~66 Hz
+
+        log.info("poll_loop stopped")
 
     def _register(self, hotkey_id, hotkey_str):
+        if _is_modifier_hotkey(hotkey_str):
+            log.info("Modifier-only hotkey '%s' — using polling, skipping RegisterHotKey", hotkey_str)
+            return
         mod, vk = _parse_hotkey(hotkey_str)
         if vk == 0:
             return
@@ -150,13 +206,27 @@ class HotkeyManager:
         else:
             log.info("RegisterHotKey OK: '%s' id=%d vk=0x%02X", hotkey_str, hotkey_id, vk)
 
-    def _process_updates(self):
+    def _process_updates_msg(self):
+        """Обработка обновлений в msg_loop (RegisterHotKey)."""
         while not self._update_q.empty():
             try:
                 hid, hstr = self._update_q.get_nowait()
+                mod, vk = _parse_hotkey(hstr)
+                if vk == 0:
+                    log.error("update_hotkey REJECTED: '%s' is not a valid key", hstr)
+                    continue
                 ok = user32.UnregisterHotKey(None, hid)
                 log.info("UnregisterHotKey id=%d: %s", hid, "OK" if ok else "FAILED")
                 self._register(hid, hstr)
+            except queue.Empty:
+                break
+
+    def _process_updates_poll(self):
+        """Обработка обновлений в poll_loop (modifier-only)."""
+        while not self._update_q.empty():
+            try:
+                hid, hstr = self._update_q.get_nowait()
+                log.info("poll update_hotkey: '%s'", hstr)
             except queue.Empty:
                 break
 
@@ -174,7 +244,7 @@ class HotkeyManager:
                 return
             self._recording = True
             hwnd = win32gui.GetForegroundWindow()
-            log.info(">>> F9 PRESSED  >>> recording_start hwnd=%s", hwnd)
+            log.info(">>> HOTKEY PRESSED  >>> recording_start hwnd=%s", hwnd)
             self._bus.recording_start.emit(hwnd)
             threading.Thread(target=self._poll_key_up, daemon=True).start()
 
@@ -184,7 +254,6 @@ class HotkeyManager:
             _, vk = _parse_hotkey(self._hotkey)
             poll_start = time.monotonic()
             while self._recording:
-                # Защита от бесконечного опроса (макс 120с, как recording_timeout)
                 if time.monotonic() - poll_start > 120:
                     log.error("_poll_key_up: timeout 120s, forcing stop")
                     break
@@ -195,10 +264,9 @@ class HotkeyManager:
         except Exception as e:
             log.exception("_poll_key_up error: %s", e)
         finally:
-            # Гарантированный сброс _recording и эмит recording_stop
             if self._recording:
                 self._recording = False
                 self._last_stop_time = time.monotonic()
                 hold_time = time.monotonic() - poll_start
-                log.info("<<< F9 RELEASED <<< recording_stop (held %.1fs)", hold_time)
+                log.info("<<< HOTKEY RELEASED <<< recording_stop (held %.1fs)", hold_time)
                 self._bus.recording_stop.emit()
