@@ -4,6 +4,9 @@ __pycache__/
 .claude/
 .claude_settings.json
 .mcp.json
+CLAUDE.md
+.context/
+pm/
 
 # Auto Claude data directory
 .auto-claude/
