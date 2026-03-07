@@ -1,6 +1,8 @@
 """LLMManager — коррекция текста через Qwen2.5 (CTranslate2 Generator)."""
 
 import logging
+import os
+import sys
 import threading
 
 from core.config_manager import APP_DIR
@@ -8,6 +10,27 @@ from core.config_manager import APP_DIR
 log = logging.getLogger(__name__)
 
 MODELS_DIR = APP_DIR / "models"
+
+def _ensure_cuda_libs():
+    """Добавить пути к CUDA DLL (nvidia pip packages) если нужно."""
+    for pkg_name in ("nvidia.cublas", "nvidia.cudnn"):
+        try:
+            pkg = __import__(pkg_name, fromlist=[""])
+            # namespace packages have __path__ but __file__ is None
+            pkg_dirs = list(getattr(pkg, "__path__", []))
+            if not pkg_dirs:
+                continue
+            bin_dir = os.path.join(pkg_dirs[0], "bin")
+            if not os.path.isdir(bin_dir):
+                continue
+            if bin_dir not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
+                if sys.platform == "win32":
+                    os.add_dll_directory(bin_dir)
+                log.debug("Added CUDA DLL path: %s", bin_dir)
+        except ImportError:
+            pass
+
 
 SYSTEM_PROMPT = (
     "Исправь пунктуацию, капитализацию и очевидные ошибки распознавания речи в тексте. "
@@ -48,26 +71,51 @@ class LLMManager:
                 return
 
             device = self._config.get('llm', 'device', default='cuda')
-            compute_type = self._config.get('llm', 'compute_type', default='int8_float16')
+            compute_type = self._config.get('llm', 'compute_type', default='auto')
 
             try:
+                _ensure_cuda_libs()
                 import ctranslate2
                 from transformers import AutoTokenizer
 
-                log.info("Loading LLM: %s (device=%s, compute=%s)", model_path, device, compute_type)
+                # Попытка загрузки с fallback по compute_type
+                fallback_types = [compute_type, "auto", "float32"]
+                # Убираем дубликаты, сохраняя порядок
+                seen = set()
+                unique_types = []
+                for ct in fallback_types:
+                    if ct not in seen:
+                        seen.add(ct)
+                        unique_types.append(ct)
 
-                self._generator = ctranslate2.Generator(
-                    str(model_path),
-                    device=device,
-                    compute_type=compute_type,
-                )
+                generator = None
+                used_type = None
+                for ct in unique_types:
+                    try:
+                        log.info("Loading LLM: %s (device=%s, compute=%s)", model_path, device, ct)
+                        generator = ctranslate2.Generator(
+                            str(model_path),
+                            device=device,
+                            compute_type=ct,
+                        )
+                        used_type = ct
+                        break
+                    except ValueError as ve:
+                        log.warning("compute_type %s not supported: %s", ct, ve)
+                        continue
+
+                if generator is None:
+                    log.error("Failed to load LLM: no supported compute_type found")
+                    return
+
+                self._generator = generator
 
                 self._tokenizer = AutoTokenizer.from_pretrained(
                     str(model_path),
                     trust_remote_code=False,
                 )
 
-                log.info("LLM loaded successfully")
+                log.info("LLM loaded successfully (compute_type=%s)", used_type)
             except Exception as e:
                 log.exception("Failed to load LLM: %s", e)
                 self._generator = None
@@ -112,20 +160,17 @@ class LLMManager:
                 self._tokenizer.encode(prompt_text)
             )
 
-            results = self._generator.generate_tokens(
-                prompt_tokens,
+            results = self._generator.generate_batch(
+                [prompt_tokens],
                 max_length=512,
                 sampling_temperature=0.1,
                 repetition_penalty=1.1,
-                end_token=self._tokenizer.eos_token_id,
+                end_token=[self._tokenizer.eos_token_id],
+                include_prompt_in_result=False,
             )
 
-            output_ids = []
-            for token_result in results:
-                if token_result.token_id == self._tokenizer.eos_token_id:
-                    break
-                output_ids.append(token_result.token_id)
-
+            output_tokens = results[0].sequences[0]
+            output_ids = self._tokenizer.convert_tokens_to_ids(output_tokens)
             corrected = self._tokenizer.decode(output_ids, skip_special_tokens=True).strip()
 
             if not corrected:

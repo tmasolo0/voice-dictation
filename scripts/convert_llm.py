@@ -7,7 +7,7 @@ from pathlib import Path
 
 REPO_ID = "Qwen/Qwen2.5-1.5B-Instruct"
 MODEL_NAME = "qwen2.5-1.5b-ct2"
-QUANTIZATION = "int8_float16"
+QUANTIZATION = "float16"
 
 TOKENIZER_FILES = [
     "tokenizer.json",
