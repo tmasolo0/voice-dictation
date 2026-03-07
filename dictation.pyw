@@ -93,8 +93,21 @@ def setup_logging():
     sys.excepthook = exception_handler
 
 
+_mutex = None  # Глобальная ссылка, чтобы GC не собрал mutex
+
+
 def main():
+    global _mutex
     _check_elevation()
+
+    # Single instance — Windows Named Mutex
+    _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "VoiceDictation_SingleInstance")
+    if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        ctypes.windll.user32.MessageBoxW(
+            0, "Voice Dictation уже запущен.", "Voice Dictation", 0x40
+        )
+        sys.exit(0)
+
     setup_logging()
     qt_app = QApplication(sys.argv)
     qt_app.setQuitOnLastWindowClosed(False)

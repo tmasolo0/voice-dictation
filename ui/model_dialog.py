@@ -23,7 +23,7 @@ from core.model_catalog import ALLOW_PATTERNS, MODEL_CATALOG, MODELS_DIR, is_mod
 class ModelDownloadThread(QThread):
     """Скачивание модели через huggingface_hub в отдельном потоке."""
 
-    progress = pyqtSignal(int, int)    # downloaded_bytes, total_bytes
+    progress = pyqtSignal(int, int, float)  # current_mb, total_mb, speed_mb_s
     finished_ok = pyqtSignal(str)      # model_name
     error = pyqtSignal(str)            # error message
 
@@ -35,23 +35,43 @@ class ModelDownloadThread(QThread):
 
     def run(self):
         try:
+            import sys
             from huggingface_hub import snapshot_download
-            from tqdm import tqdm as tqdm_base
+            import huggingface_hub.utils.tqdm  # noqa: ensure module loaded
+            hf_tqdm_mod = sys.modules['huggingface_hub.utils.tqdm']
 
             thread_ref = self
+            original_hf_tqdm = hf_tqdm_mod.tqdm
 
-            class ProgressTqdm(tqdm_base):
+            class ProgressTqdm(original_hf_tqdm):
+                def __init__(self, *args, **kwargs):
+                    # Без console (PyInstaller windowed) tqdm auto-disabled
+                    # Принудительно включаем — нам нужен только трекинг self.n
+                    kwargs['disable'] = False
+                    super().__init__(*args, **kwargs)
+
                 def update(self, n=1):
                     super().update(n)
-                    if self.total is not None:
-                        thread_ref.progress.emit(int(self.n), int(self.total))
+                    if self.total is not None and self.total > 1024 * 1024:
+                        mb = 1024 * 1024
+                        rate = self.format_dict.get('rate') or 0
+                        thread_ref.progress.emit(
+                            int(self.n // mb), int(self.total // mb),
+                            rate / mb)
 
-            snapshot_download(
-                self._repo_id,
-                local_dir=str(self._output_dir),
-                allow_patterns=ALLOW_PATTERNS,
-                tqdm_class=ProgressTqdm,
-            )
+            # Monkey-patch huggingface_hub.utils.tqdm.tqdm —
+            # именно этот класс используется для побайтовых progress bar-ов
+            hf_tqdm_mod.tqdm = ProgressTqdm
+            try:
+                snapshot_download(
+                    self._repo_id,
+                    local_dir=str(self._output_dir),
+                    allow_patterns=ALLOW_PATTERNS,
+                    tqdm_class=ProgressTqdm,
+                )
+            finally:
+                hf_tqdm_mod.tqdm = original_hf_tqdm
+
             self.finished_ok.emit(self._model_name)
         except Exception as e:
             self.error.emit(str(e))
@@ -107,7 +127,7 @@ class ModelManagerDialog(QDialog):
 
     def _populate_table(self):
         """Заполнить таблицу моделями из каталога."""
-        active_model = self._config.get('recognition', 'model', default='large-v3-turbo')
+        active_model = self._config.get('recognition', 'model', default='large-v3')
         models = list(MODEL_CATALOG.items())
 
         self._table.setRowCount(len(models))
@@ -181,10 +201,17 @@ class ModelManagerDialog(QDialog):
         self._progress_bar.show()
         self._download_thread.start()
 
-    def _on_download_progress(self, current: int, total: int):
-        """Обновить прогресс-бар."""
-        self._progress_bar.setMaximum(total)
-        self._progress_bar.setValue(current)
+    def _on_download_progress(self, current_mb: int, total_mb: int, speed_mb: float):
+        """Обновить прогресс-бар (значения в МБ)."""
+        self._progress_bar.setMaximum(total_mb)
+        self._progress_bar.setValue(current_mb)
+        if total_mb > 0:
+            remaining = total_mb - current_mb
+            eta = f"{remaining / speed_mb:.0f}с" if speed_mb > 0 else "..."
+            self._status_label.setText(
+                f"Скачивание: {current_mb} / {total_mb} МБ  |  "
+                f"{speed_mb:.1f} МБ/с  |  ~{eta}"
+            )
 
     def _on_download_finished(self, model_name: str):
         """Скачивание завершено."""

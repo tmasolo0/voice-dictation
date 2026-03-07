@@ -38,7 +38,7 @@ from core.audio_ducking import AudioDucker
 from ui.tray import TrayManager
 
 
-MODEL_TURBO = 'large-v3-turbo'
+MODEL_DEFAULT = 'large-v3'
 
 
 class Application:
@@ -51,7 +51,7 @@ class Application:
         # Core-сервисы
         self.model_manager = ModelManager(self.bus, config)
         self.audio = AudioCapture(self.bus, config)
-        self.llm_manager = LLMManager(config)
+        self.llm_manager = LLMManager(config, event_bus=self.bus)
         self.recognizer = Recognizer(self.bus, self.model_manager, config, llm_manager=self.llm_manager)
         self.pipeline = OutputPipeline(self.bus, config)
         self.inserter = TextInserter(self.bus, config)
@@ -99,11 +99,11 @@ class Application:
         if not get_local_models():
             self._prompt_download_models()
 
-        model_name = config.get('recognition', 'model', default=MODEL_TURBO)
+        model_name = config.get('recognition', 'model', default=MODEL_DEFAULT)
         self.model_manager.load_model(model_name)
 
         if config.get('llm', 'enabled', default=False):
-            self.llm_manager.load_model()
+            self.llm_manager.load_model_async()
 
         self.audio.open_stream()
         self.hotkeys.start()
@@ -112,7 +112,7 @@ class Application:
         import ctypes
         version = get_version()
         hotkey = config.get('recognition', 'hotkey', default='f9')
-        dictation_model = config.get('recognition', 'model', default=MODEL_TURBO)
+        dictation_model = config.get('recognition', 'model', default=MODEL_DEFAULT)
         try:
             is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
         except Exception:
@@ -189,7 +189,7 @@ class Application:
         self.hotkeys.set_enabled(False)
 
         old_hotkey = config.get('recognition', 'hotkey', default='f9')
-        old_model = config.get('recognition', 'model', default=MODEL_TURBO)
+        old_model = config.get('recognition', 'model', default=MODEL_DEFAULT)
         old_llm_enabled = config.get('llm', 'enabled', default=False)
 
         dialog = SettingsDialog(config, parent=self.widget)
@@ -203,10 +203,10 @@ class Application:
                 log.info("settings: hotkey changed '%s' -> '%s'", old_hotkey, new_hotkey)
                 self.hotkeys.update_hotkey(new_hotkey)
 
-            self.widget.dictation_model = config.get('recognition', 'model', default=MODEL_TURBO)
+            self.widget.dictation_model = config.get('recognition', 'model', default=MODEL_DEFAULT)
             self.widget.update()
 
-            new_model = config.get('recognition', 'model', default=MODEL_TURBO)
+            new_model = config.get('recognition', 'model', default=MODEL_DEFAULT)
             if new_model != old_model:
                 log.info("settings: model changed '%s' -> '%s'", old_model, new_model)
                 self.model_manager.load_model(new_model)
@@ -215,10 +215,11 @@ class Application:
             new_llm_enabled = config.get('llm', 'enabled', default=False)
             if new_llm_enabled and not old_llm_enabled:
                 log.info("settings: LLM enabled, loading model")
-                self.llm_manager.load_model()
+                self.llm_manager.load_model_async()
             elif not new_llm_enabled and old_llm_enabled:
                 log.info("settings: LLM disabled, unloading model")
                 self.llm_manager.unload_model()
+                self.bus.llm_load_failed.emit("")  # сброс индикатора на виджете
 
     def _prompt_download_models(self):
         """Первый запуск без моделей — предложить скачать."""
@@ -243,4 +244,6 @@ class Application:
         self.llm_manager.unload_model()
         self.audio.close_stream()
         self.hotkeys.stop()
+        self.tray._tray_icon.hide()
+        self.widget.force_quit()
         QApplication.quit()

@@ -2,7 +2,7 @@
 ; Компиляция: Inno Setup 6 → Compile (Ctrl+F9)
 
 #define MyAppName "Voice Dictation"
-#define MyAppVersion "1.0.6"
+#define MyAppVersion "1.0.7"
 #define MyAppExeName "VoiceDictation.exe"
 #define MyAppPublisher "Voice Dictation"
 

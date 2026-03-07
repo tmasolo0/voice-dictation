@@ -174,14 +174,45 @@ class LLMConvertThread(QThread):
     """Скачивание и конвертация LLM модели в фоне."""
 
     progress_msg = pyqtSignal(str)
+    progress_bytes = pyqtSignal(int, int, float)  # current_mb, total_mb, speed_mb_s
     finished_ok = pyqtSignal()
     error = pyqtSignal(str)
 
     def run(self):
         try:
+            import sys
             from scripts.convert_llm import convert
-            self.progress_msg.emit("Скачивание и конвертация модели...")
-            convert()
+            import huggingface_hub.utils.tqdm  # noqa: ensure module loaded
+            hf_tqdm_mod = sys.modules['huggingface_hub.utils.tqdm']
+
+            thread_ref = self
+            original_hf_tqdm = hf_tqdm_mod.tqdm
+
+            class ProgressTqdm(original_hf_tqdm):
+                def __init__(self, *args, **kwargs):
+                    kwargs['disable'] = False
+                    super().__init__(*args, **kwargs)
+
+                def update(self, n=1):
+                    super().update(n)
+                    if self.total is not None and self.total > 1024 * 1024:
+                        mb = 1024 * 1024
+                        rate = self.format_dict.get('rate') or 0
+                        thread_ref.progress_bytes.emit(
+                            int(self.n // mb), int(self.total // mb),
+                            rate / mb)
+
+            def on_phase(phase: str):
+                thread_ref.progress_msg.emit(phase)
+
+            # Monkey-patch huggingface_hub.utils.tqdm.tqdm —
+            # именно этот класс используется для побайтовых progress bar-ов
+            hf_tqdm_mod.tqdm = ProgressTqdm
+            try:
+                convert(tqdm_class=ProgressTqdm, progress_callback=on_phase)
+            finally:
+                hf_tqdm_mod.tqdm = original_hf_tqdm
+
             self.finished_ok.emit()
         except Exception as e:
             self.error.emit(str(e))
@@ -457,9 +488,15 @@ class SettingsDialog(QDialog):
 
     def _update_llm_status(self):
         """Обновить статус LLM-модели в UI."""
-        from core.llm_manager import LLMManager, MODELS_DIR
+        from core.llm_manager import MODELS_DIR
         model_name = self._config.get('llm', 'model', default='qwen2.5-1.5b-ct2')
         model_path = MODELS_DIR / model_name / "model.bin"
+
+        # Скрыть progress bar если нет активной конвертации
+        if self._llm_convert_thread is None or not self._llm_convert_thread.isRunning():
+            self._llm_progress.hide()
+            self._llm_progress.setRange(0, 0)
+
         if model_path.exists():
             self._llm_status_label.setText("Модель загружена")
             self._llm_download_btn.hide()
@@ -499,16 +536,33 @@ class SettingsDialog(QDialog):
 
         self._llm_convert_thread = LLMConvertThread()
         self._llm_convert_thread.progress_msg.connect(self._on_llm_progress_msg)
+        self._llm_convert_thread.progress_bytes.connect(self._on_llm_progress_bytes)
         self._llm_convert_thread.finished_ok.connect(self._on_llm_convert_finished)
         self._llm_convert_thread.error.connect(self._on_llm_convert_error)
 
+        self._llm_progress.setRange(0, 0)  # indeterminate
         self._llm_progress.show()
         self._llm_download_btn.setEnabled(False)
-        self._llm_status_label.setText("Скачивание и конвертация...")
+        self._llm_status_label.setText("Скачивание модели...")
         self._llm_convert_thread.start()
 
     def _on_llm_progress_msg(self, msg: str):
         self._llm_status_label.setText(msg)
+        if "Конвертация" in msg:
+            self._llm_progress.setRange(0, 0)  # indeterminate для конвертации
+            self._llm_progress.setValue(0)
+
+    def _on_llm_progress_bytes(self, current_mb: int, total_mb: int, speed_mb: float):
+        """Обновить progress bar с прогрессом скачивания (значения в МБ)."""
+        if total_mb > 0:
+            self._llm_progress.setRange(0, total_mb)
+            self._llm_progress.setValue(current_mb)
+            remaining = total_mb - current_mb
+            eta = f"{remaining / speed_mb:.0f}с" if speed_mb > 0 else "..."
+            self._llm_status_label.setText(
+                f"Скачивание: {current_mb} / {total_mb} МБ  |  "
+                f"{speed_mb:.1f} МБ/с  |  ~{eta}"
+            )
 
     def _on_llm_convert_finished(self):
         self._llm_progress.hide()
@@ -579,7 +633,7 @@ class SettingsDialog(QDialog):
         self._populate_models_table()
 
     def _populate_models_table(self):
-        active_model = self._config.get("recognition", "model", default="large-v3-turbo")
+        active_model = self._config.get("recognition", "model", default="large-v3")
         models = list(MODEL_CATALOG.items())
         self._models_table.setRowCount(len(models))
 
@@ -652,9 +706,16 @@ class SettingsDialog(QDialog):
         self._model_status.setText(f"Скачивание {model_name}...")
         self._download_thread.start()
 
-    def _on_model_download_progress(self, current, total):
-        self._model_progress.setMaximum(total)
-        self._model_progress.setValue(current)
+    def _on_model_download_progress(self, current_mb, total_mb, speed_mb):
+        self._model_progress.setMaximum(total_mb)
+        self._model_progress.setValue(current_mb)
+        if total_mb > 0:
+            remaining = total_mb - current_mb
+            eta = f"{remaining / speed_mb:.0f}с" if speed_mb > 0 else "..."
+            self._model_status.setText(
+                f"Скачивание: {current_mb} / {total_mb} МБ  |  "
+                f"{speed_mb:.1f} МБ/с  |  ~{eta}"
+            )
 
     def _on_model_download_finished(self, model_name):
         self._model_progress.hide()
@@ -689,7 +750,7 @@ class SettingsDialog(QDialog):
         self._audio_ducking_check.setChecked(c.get("widget", "audio_ducking", default=True))
 
         # Recognition
-        model = c.get("recognition", "model", default="large-v3-turbo")
+        model = c.get("recognition", "model", default="large-v3")
         idx = self._model_combo.findData(model)
         if idx >= 0:
             self._model_combo.setCurrentIndex(idx)

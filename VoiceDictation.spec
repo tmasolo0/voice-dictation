@@ -33,7 +33,9 @@ a = Analysis(
         # Audio
         'sounddevice', '_sounddevice_data', 'numpy',
         # Whisper / CTranslate2
-        'ctranslate2', 'faster_whisper', 'huggingface_hub', 'tqdm',
+        'ctranslate2', 'faster_whisper',
+        'huggingface_hub', 'huggingface_hub.utils', 'huggingface_hub.utils.tqdm',
+        'tqdm',
         # Input
         'keyboard', 'pyperclip', 'pyautogui',
         # Win32
@@ -43,6 +45,10 @@ a = Analysis(
         'core.tray', 'core.model_manager', 'core.model_catalog',
         'core.history_manager', 'core.event_bus',
         'app', 'settings_dialog',
+        # LLM conversion (dynamic imports in settings_dialog.py / convert_llm.py)
+        'scripts', 'scripts.convert_llm',
+        'ctranslate2.converters', 'ctranslate2.converters.transformers',
+        'transformers', 'transformers.models', 'transformers.models.auto',
     ],
     hookspath=[],
     hooksconfig={},

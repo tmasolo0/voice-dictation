@@ -37,8 +37,8 @@ DEFAULT_CONFIG = {
         "duck_level": 0.15
     },
     "recognition": {
-        "hotkey": "f9",
-        "model": "large-v3-turbo",
+        "hotkey": "left ctrl",
+        "model": "large-v3",
         "device": "cuda",
         "compute_type": "float16",
         "language": "ru",

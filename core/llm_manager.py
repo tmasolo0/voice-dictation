@@ -41,8 +41,9 @@ SYSTEM_PROMPT = (
 class LLMManager:
     """Загрузка и использование LLM для постобработки текста."""
 
-    def __init__(self, config):
+    def __init__(self, config, event_bus=None):
         self._config = config
+        self._bus = event_bus
         self._generator = None
         self._tokenizer = None
         self._lock = threading.Lock()
@@ -119,16 +120,45 @@ class LLMManager:
 
                 if generator is None:
                     log.error("Failed to load LLM: no working compute_type found")
+                    if self._bus:
+                        self._bus.llm_load_failed.emit("Не найден рабочий compute_type")
                     return
 
                 self._generator = generator
                 self._tokenizer = tokenizer
 
                 log.info("LLM loaded successfully (compute_type=%s)", used_type)
+                if self._bus:
+                    self._bus.llm_load_finished.emit()
             except Exception as e:
                 log.exception("Failed to load LLM: %s", e)
                 self._generator = None
                 self._tokenizer = None
+                if self._bus:
+                    self._bus.llm_load_failed.emit(str(e))
+
+    def load_model_async(self):
+        """Запуск load_model() в фоновом потоке с сигналами через EventBus."""
+        if self._bus:
+            self._bus.llm_load_started.emit()
+
+        def _worker():
+            try:
+                already_loaded = self.is_ready
+                self.load_model()
+                if already_loaded and self._bus:
+                    # Модель уже была загружена — load_model сделал ранний return
+                    self._bus.llm_load_finished.emit()
+                elif not self.is_ready and self._bus:
+                    # Модель не загрузилась (не найдена)
+                    self._bus.llm_load_failed.emit("Модель LLM не найдена")
+            except Exception as e:
+                log.exception("Async LLM load failed: %s", e)
+                if self._bus:
+                    self._bus.llm_load_failed.emit(str(e))
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
 
     @staticmethod
     def _validate_generator(generator, tokenizer) -> bool:
@@ -190,7 +220,8 @@ class LLMManager:
         try:
             system_prompt = SYSTEM_PROMPT
             if terms:
-                limited = terms[:150]
+                # Маленькая модель теряет фокус при >50 терминов — ограничиваем
+                limited = terms[:50]
                 system_prompt += (
                     "\nСловарь терминов (используй правильное написание): "
                     + ", ".join(limited) + "."
@@ -231,6 +262,17 @@ class LLMManager:
             corrected = self._tokenizer.decode(output_ids, skip_special_tokens=True).strip()
 
             if not corrected:
+                return text
+
+            # Защита: если ответ слишком длинный (>3x входа) — модель галлюцинирует
+            if len(corrected) > len(text) * 3 + 50:
+                log.warning("LLM output too long (%d vs %d), returning original",
+                            len(corrected), len(text))
+                return text
+
+            # Защита: если ответ содержит фрагмент системного промпта — эхо
+            if "Словарь терминов" in corrected or "используй правильное написание" in corrected:
+                log.warning("LLM echoed system prompt, returning original text")
                 return text
 
             return corrected

@@ -19,10 +19,15 @@ class EventBus(QObject):
     # Состояние
     state_changed = pyqtSignal(str)           # AppState.name.lower()
 
-    # Управление моделью
+    # Управление моделью (Whisper)
     model_load_started = pyqtSignal(str)      # имя модели
     model_load_finished = pyqtSignal(str)     # имя модели
     model_load_failed = pyqtSignal(str)       # сообщение об ошибке
+
+    # Управление LLM
+    llm_load_started = pyqtSignal()
+    llm_load_finished = pyqtSignal()
+    llm_load_failed = pyqtSignal(str)         # сообщение об ошибке
 
     # VRAM
     vram_updated = pyqtSignal(int)            # MB видеопамяти модели

@@ -81,7 +81,7 @@ class DictationWidget(QWidget):
 
         # Визуальное состояние
         self._current_state = "ready"
-        self.dictation_model = config.get('recognition', 'model', default='large-v3-turbo')
+        self.dictation_model = config.get('recognition', 'model', default='large-v3')
         self._vram_mb = 0
 
         # Перетаскивание
@@ -101,6 +101,9 @@ class DictationWidget(QWidget):
         # Audio levels для waveform
         self._audio_levels = []
 
+        # LLM индикатор
+        self._llm_active = False
+
         # Аватар
         self._avatar_pixmap = None
         self._load_avatar()
@@ -109,12 +112,17 @@ class DictationWidget(QWidget):
         self._sound_start = _get_sound_path('start.wav')
         self._sound_stop = _get_sound_path('stop.wav')
 
+        # Принудительное закрытие
+        self._force_quit = False
+
         self._setup_ui()
         self._start_animation()
 
         # Подписка на сигналы
         self._bus.state_changed.connect(self._on_state_changed)
         self._bus.vram_updated.connect(self._on_vram_updated)
+        self._bus.llm_load_finished.connect(lambda: self._set_llm_active(True))
+        self._bus.llm_load_failed.connect(lambda _: self._set_llm_active(False))
 
     def _load_avatar(self):
         """Загрузка и подготовка круглого аватара."""
@@ -273,6 +281,11 @@ class DictationWidget(QWidget):
         self._vram_mb = vram_mb
         self.update()
 
+    def _set_llm_active(self, active: bool):
+        """Обновить индикатор LLM на виджете."""
+        self._llm_active = active
+        self.update()
+
     def _minimize_to_tray(self):
         """Свернуть в трей."""
         self.hide()
@@ -419,7 +432,7 @@ class DictationWidget(QWidget):
         font = QFont("Segoe UI", 9)
         painter.setFont(font)
 
-        model_text = self.dictation_model
+        model_text = self.dictation_model + (" +LLM" if self._llm_active else "")
 
         painter.setPen(QPen(QColor(255, 255, 255, alpha), 1))
         text_rect = QRectF(left, 0, right - left - 44, h)
@@ -502,7 +515,15 @@ class DictationWidget(QWidget):
         dlg = AboutDialog(self)
         dlg.exec()
 
+    def force_quit(self):
+        """Принудительное закрытие (для shutdown)."""
+        self._force_quit = True
+        self.close()
+
     def closeEvent(self, event):
-        """Закрытие окна — свернуть в трей."""
+        """Закрытие окна — свернуть в трей, если не force_quit."""
+        if self._force_quit:
+            event.accept()
+            return
         self._minimize_to_tray()
         event.ignore()
