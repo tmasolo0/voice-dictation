@@ -75,7 +75,7 @@ DEFAULT_CONFIG = {
         "enabled": False,
         "model": "qwen2.5-1.5b-ct2",
         "device": "cuda",
-        "compute_type": "auto",
+        "compute_type": "float32",
     },
     "system": {
         "autostart": False,

@@ -71,7 +71,7 @@ class LLMManager:
                 return
 
             device = self._config.get('llm', 'device', default='cuda')
-            compute_type = self._config.get('llm', 'compute_type', default='auto')
+            compute_type = self._config.get('llm', 'compute_type', default='float32')
 
             try:
                 _ensure_cuda_libs()
@@ -79,7 +79,7 @@ class LLMManager:
                 from transformers import AutoTokenizer
 
                 # Попытка загрузки с fallback по compute_type
-                fallback_types = [compute_type, "auto", "float32"]
+                fallback_types = [compute_type, "float32"]
                 # Убираем дубликаты, сохраняя порядок
                 seen = set()
                 unique_types = []
@@ -88,38 +88,71 @@ class LLMManager:
                         seen.add(ct)
                         unique_types.append(ct)
 
+                tokenizer = AutoTokenizer.from_pretrained(
+                    str(model_path),
+                    trust_remote_code=False,
+                )
+
                 generator = None
                 used_type = None
                 for ct in unique_types:
                     try:
                         log.info("Loading LLM: %s (device=%s, compute=%s)", model_path, device, ct)
-                        generator = ctranslate2.Generator(
+                        gen = ctranslate2.Generator(
                             str(model_path),
                             device=device,
                             compute_type=ct,
                         )
-                        used_type = ct
-                        break
                     except ValueError as ve:
                         log.warning("compute_type %s not supported: %s", ct, ve)
                         continue
 
+                    # Валидация: генерируем тестовые токены, проверяем что не все id=0
+                    if not self._validate_generator(gen, tokenizer):
+                        log.warning("compute_type %s produces garbage output, skipping", ct)
+                        del gen
+                        continue
+
+                    generator = gen
+                    used_type = ct
+                    break
+
                 if generator is None:
-                    log.error("Failed to load LLM: no supported compute_type found")
+                    log.error("Failed to load LLM: no working compute_type found")
                     return
 
                 self._generator = generator
-
-                self._tokenizer = AutoTokenizer.from_pretrained(
-                    str(model_path),
-                    trust_remote_code=False,
-                )
+                self._tokenizer = tokenizer
 
                 log.info("LLM loaded successfully (compute_type=%s)", used_type)
             except Exception as e:
                 log.exception("Failed to load LLM: %s", e)
                 self._generator = None
                 self._tokenizer = None
+
+    @staticmethod
+    def _validate_generator(generator, tokenizer) -> bool:
+        """Проверка что генератор выдаёт осмысленный результат, а не нули."""
+        try:
+            test_tokens = tokenizer.convert_ids_to_tokens(
+                tokenizer.encode("Hello, how are you?")
+            )
+            results = generator.generate_batch(
+                [test_tokens],
+                max_length=10,
+                include_prompt_in_result=False,
+            )
+            output_tokens = results[0].sequences[0]
+            if not output_tokens:
+                return False
+            output_ids = tokenizer.convert_tokens_to_ids(output_tokens)
+            # Если все id = 0 — модель генерирует мусор
+            if all(i == 0 for i in output_ids):
+                return False
+            return True
+        except Exception as e:
+            log.warning("LLM validation failed: %s", e)
+            return False
 
     def unload_model(self):
         """Выгрузка модели, освобождение VRAM."""
@@ -171,6 +204,12 @@ class LLMManager:
 
             output_tokens = results[0].sequences[0]
             output_ids = self._tokenizer.convert_tokens_to_ids(output_tokens)
+
+            # Защита: если все id=0 — модель выдаёт мусор
+            if output_ids and all(i == 0 for i in output_ids):
+                log.warning("LLM output is all zeros, returning original text")
+                return text
+
             corrected = self._tokenizer.decode(output_ids, skip_special_tokens=True).strip()
 
             if not corrected:
