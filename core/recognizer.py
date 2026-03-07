@@ -82,7 +82,17 @@ class Recognizer:
             beam_size = self._config.get('recognition', 'beam_size', default=5)
             temperature = self._config.get('recognition', 'temperature', default=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
             use_hotwords = self._config.get('recognition', 'use_hotwords', default=True)
-            hotwords = self._config.get_hotwords() if use_hotwords else ""
+            llm_active = (self._llm and self._llm.is_ready
+                          and self._config.get('llm', 'enabled', default=False))
+
+            # Когда LLM активна — hotwords НЕ передаём в Whisper (снижает галлюцинации),
+            # термины пойдут в LLM prompt. Когда LLM выключена — hotwords как раньше.
+            if use_hotwords and not llm_active:
+                hotwords = self._config.get_hotwords()
+            else:
+                hotwords = ""
+
+            terms = self._config.get_terms_list() if (use_hotwords and llm_active) else []
 
             language = self._config.get('recognition', 'language', default=None)
             if not language or language == 'auto':
@@ -144,14 +154,13 @@ class Recognizer:
                 text = ""
 
             # LLM-коррекция (если включена и модель загружена)
-            if text and self._llm and self._llm.is_ready:
-                if self._config.get('llm', 'enabled', default=False):
-                    try:
-                        corrected = self._llm.correct(text)
-                        log.info("llm_correction: '%s' -> '%s'", text[:60], corrected[:60])
-                        text = corrected
-                    except Exception as e:
-                        log.warning("llm_correction fallback: %s", e)
+            if text and llm_active:
+                try:
+                    corrected = self._llm.correct(text, terms=terms or None)
+                    log.info("llm_correction: '%s' -> '%s'", text[:60], corrected[:60])
+                    text = corrected
+                except Exception as e:
+                    log.warning("llm_correction fallback: %s", e)
 
             text = self._apply_replacements(text)
             elapsed = time.time() - start

@@ -488,16 +488,19 @@ class DictationWidget(QWidget):
 
         menu.addSeparator()
 
-        reset_pos_action = menu.addAction("Сбросить позицию")
-        reset_pos_action.triggered.connect(self._reset_position)
-
-        minimize_action = menu.addAction("Свернуть в трей")
-        minimize_action.triggered.connect(self._minimize_to_tray)
+        about_action = menu.addAction("О программе...")
+        about_action.triggered.connect(self._show_about)
 
         quit_action = menu.addAction("Выход")
         quit_action.triggered.connect(lambda: self._bus.quit_requested.emit())
 
         menu.exec(event.globalPos())
+
+    def _show_about(self):
+        """Показать диалог 'О программе'."""
+        from ui.about_dialog import AboutDialog
+        dlg = AboutDialog(self)
+        dlg.exec()
 
     def closeEvent(self, event):
         """Закрытие окна — свернуть в трей."""

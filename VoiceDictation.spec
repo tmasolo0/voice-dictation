@@ -25,6 +25,7 @@ a = Analysis(
         ('dictionaries', 'dictionaries'),
         ('Ava.jpg', '.'),
         ('assets/sounds', 'assets/sounds'),
+        ('README.md', '.'),
     ] + fw_assets,
     hiddenimports=[
         # PyQt6
@@ -64,7 +65,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
-    uac_admin=True,
+    uac_admin=False,
     icon='assets/icon.ico',
 )
 

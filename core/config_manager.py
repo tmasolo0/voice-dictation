@@ -41,7 +41,7 @@ DEFAULT_CONFIG = {
         "model": "large-v3-turbo",
         "device": "cuda",
         "compute_type": "float16",
-        "language": "auto",
+        "language": "ru",
         "initial_prompt": "",                    # Контекст для декодера (короткая фраза, НЕ список терминов)
         "use_hotwords": True,                    # Использовать hotwords из словарей (может вызывать галлюцинации)
         # --- Параметры качества транскрипции ---
@@ -249,6 +249,44 @@ class ConfigManager:
                 print(f"Доменный словарь не найден: {domain_file}")
 
         return " ".join(sorted(terms)) if terms else ""
+
+    def _load_dictionary_terms(self, path: Path) -> list:
+        """Загрузка терминов из файла словаря с оригинальным регистром."""
+        if not path.exists():
+            return []
+        try:
+            text = path.read_text(encoding='utf-8')
+            return [
+                line.strip()
+                for line in text.splitlines()
+                if line.strip() and not line.strip().startswith('#')
+            ]
+        except IOError as e:
+            print(f"Ошибка чтения словаря {path}: {e}")
+            return []
+
+    def get_terms_list(self) -> list:
+        """Собирает термины с оригинальным регистром для LLM prompt."""
+        terms = []
+        seen = set()
+
+        for term in self._load_dictionary_terms(DICTIONARY_FILE):
+            key = term.lower()
+            if key not in seen:
+                seen.add(key)
+                terms.append(term)
+
+        active = self.get('dictionaries', 'active', default=[])
+        for domain in active:
+            domain_file = DICTIONARIES_DIR / f"{domain}.txt"
+            if domain_file.exists():
+                for term in self._load_dictionary_terms(domain_file):
+                    key = term.lower()
+                    if key not in seen:
+                        seen.add(key)
+                        terms.append(term)
+
+        return terms
 
     def get_replacements(self) -> dict:
         """Загрузка словаря замен из replacements.json."""

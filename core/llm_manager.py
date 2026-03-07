@@ -182,14 +182,22 @@ class LLMManager:
             except ImportError:
                 pass
 
-    def correct(self, text: str) -> str:
+    def correct(self, text: str, terms: list[str] | None = None) -> str:
         """Коррекция текста через LLM. При ошибке — возвращает исходный text."""
         if not self.is_ready or not text.strip():
             return text
 
         try:
+            system_prompt = SYSTEM_PROMPT
+            if terms:
+                limited = terms[:150]
+                system_prompt += (
+                    "\nСловарь терминов (используй правильное написание): "
+                    + ", ".join(limited) + "."
+                )
+
             messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": text},
             ]
 
