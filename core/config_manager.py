@@ -22,7 +22,7 @@ CONFIG_FILE = APP_DIR / "config.json"
 DICTIONARY_FILE = BUNDLE_DIR / "dictionary.txt"
 DICTIONARIES_DIR = BUNDLE_DIR / "dictionaries"
 REPLACEMENTS_FILE = APP_DIR / "replacements.json"
-CONFIG_VERSION = 14
+CONFIG_VERSION = 15
 
 DEFAULT_CONFIG = {
     "version": CONFIG_VERSION,
@@ -70,6 +70,12 @@ DEFAULT_CONFIG = {
         "punctuation": True,
         "capitalization": True,
         "trailing_dot": True
+    },
+    "llm": {
+        "enabled": False,
+        "model": "qwen2.5-1.5b-ct2",
+        "device": "cuda",
+        "compute_type": "int8_float16",
     },
     "system": {
         "autostart": False,

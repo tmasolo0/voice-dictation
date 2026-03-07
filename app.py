@@ -32,6 +32,7 @@ from core.recognizer import Recognizer
 from core.output_pipeline import OutputPipeline
 from core.text_inserter import TextInserter
 from core.hotkeys import HotkeyManager
+from core.llm_manager import LLMManager
 from ui.widget import DictationWidget
 from core.audio_ducking import AudioDucker
 from ui.tray import TrayManager
@@ -50,7 +51,8 @@ class Application:
         # Core-сервисы
         self.model_manager = ModelManager(self.bus, config)
         self.audio = AudioCapture(self.bus, config)
-        self.recognizer = Recognizer(self.bus, self.model_manager, config)
+        self.llm_manager = LLMManager(config)
+        self.recognizer = Recognizer(self.bus, self.model_manager, config, llm_manager=self.llm_manager)
         self.pipeline = OutputPipeline(self.bus, config)
         self.inserter = TextInserter(self.bus, config)
         self.hotkeys = HotkeyManager(self.bus, config)
@@ -99,6 +101,9 @@ class Application:
 
         model_name = config.get('recognition', 'model', default=MODEL_TURBO)
         self.model_manager.load_model(model_name)
+
+        if config.get('llm', 'enabled', default=False):
+            self.llm_manager.load_model()
 
         self.audio.open_stream()
         self.hotkeys.start()
@@ -185,6 +190,7 @@ class Application:
 
         old_hotkey = config.get('recognition', 'hotkey', default='f9')
         old_model = config.get('recognition', 'model', default=MODEL_TURBO)
+        old_llm_enabled = config.get('llm', 'enabled', default=False)
 
         dialog = SettingsDialog(config, parent=self.widget)
         result = dialog.exec()
@@ -204,6 +210,15 @@ class Application:
             if new_model != old_model:
                 log.info("settings: model changed '%s' -> '%s'", old_model, new_model)
                 self.model_manager.load_model(new_model)
+
+            # LLM toggle
+            new_llm_enabled = config.get('llm', 'enabled', default=False)
+            if new_llm_enabled and not old_llm_enabled:
+                log.info("settings: LLM enabled, loading model")
+                self.llm_manager.load_model()
+            elif not new_llm_enabled and old_llm_enabled:
+                log.info("settings: LLM disabled, unloading model")
+                self.llm_manager.unload_model()
 
     def _prompt_download_models(self):
         """Первый запуск без моделей — предложить скачать."""
@@ -225,6 +240,7 @@ class Application:
         """Корректное завершение."""
         self.widget._save_position()
         self.recognizer.shutdown()
+        self.llm_manager.unload_model()
         self.audio.close_stream()
         self.hotkeys.stop()
         QApplication.quit()

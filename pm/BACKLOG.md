@@ -1,21 +1,6 @@
 # BACKLOG.md
 
 ## P1 -- Важно
-- [ ] LLM-постобработка для исправления терминов и пунктуации
-  - Модель: Qwen2.5-1.5B-Instruct через CTranslate2 (float16)
-  - VRAM: ~3 GB дополнительно (суммарно ~6 GB из 32 GB)
-  - Латентность: ~400-500ms
-  - Опционально: галочка в настройках (по умолчанию включена)
-  - Когда выключена -- работают текущие regex-процессоры
-  - Когда включена -- LLM заменяет regex-процессоры
-  - Подзадачи:
-    1. Конвертация Qwen2.5-1.5B-Instruct в CTranslate2 float16
-    2. PoC: benchmark скрипт (латентность + качество на 20 фразах)
-    3. `core/llm_corrector.py` -- загрузка модели, инференс
-    4. Интеграция в Recognizer._transcribe() (worker thread)
-    5. Config: секция `llm_correction`, toggle, выбор модели
-    6. UI: toggle в настройках "Использовать LLM для постобработки"
-    7. Prompt engineering: подбор оптимального промпта для русского
 
 ## P2 -- Желательно
 - [ ] Floating bar виджет в стиле Aqua Voice -- замена круглого виджета
@@ -27,4 +12,5 @@
 - [ ] Mouse wheel blocked during F9 recording -- keyboard library hook issue
 
 ## Выполнено
+- [x] LLM-постобработка Qwen2.5-1.5B через CTranslate2 (@Дмитрий, v1.0.6)
 - [x] Audio ducking -- приглушение системного звука при записи (pycaw) (@Дмитрий, v1.0.5)

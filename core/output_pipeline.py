@@ -103,12 +103,14 @@ class OutputPipeline:
             log.info("pipeline_start: input='%s' metadata=%s", text[:100], metadata)
 
             processors = [StripProcessor()]
-            if self._config.get('postprocessing', 'punctuation', default=True):
-                processors.append(PunctuationProcessor())
-            if self._config.get('postprocessing', 'capitalization', default=True):
-                processors.append(CapitalizationProcessor())
-            if self._config.get('postprocessing', 'trailing_dot', default=True):
-                processors.append(TrailingDotProcessor())
+            llm_active = self._config.get('llm', 'enabled', default=False)
+            if not llm_active:
+                if self._config.get('postprocessing', 'punctuation', default=True):
+                    processors.append(PunctuationProcessor())
+                if self._config.get('postprocessing', 'capitalization', default=True):
+                    processors.append(CapitalizationProcessor())
+                if self._config.get('postprocessing', 'trailing_dot', default=True):
+                    processors.append(TrailingDotProcessor())
 
             for proc in processors:
                 text = proc.process(text, metadata)

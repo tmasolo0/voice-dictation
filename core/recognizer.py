@@ -39,10 +39,11 @@ _HALLUCINATION_PHRASES = [
 class Recognizer:
     """Транскрипция аудио через faster-whisper."""
 
-    def __init__(self, event_bus, model_manager, config):
+    def __init__(self, event_bus, model_manager, config, llm_manager=None):
         self._bus = event_bus
         self._models = model_manager
         self._config = config
+        self._llm = llm_manager
         self._executor = ThreadPoolExecutor(max_workers=1)
         self._busy = False
         self._busy_lock = threading.Lock()
@@ -141,6 +142,16 @@ class Recognizer:
             if text and self._is_hallucination(text):
                 log.warning("hallucination filtered: '%s'", text[:100])
                 text = ""
+
+            # LLM-коррекция (если включена и модель загружена)
+            if text and self._llm and self._llm.is_ready:
+                if self._config.get('llm', 'enabled', default=False):
+                    try:
+                        corrected = self._llm.correct(text)
+                        log.info("llm_correction: '%s' -> '%s'", text[:60], corrected[:60])
+                        text = corrected
+                    except Exception as e:
+                        log.warning("llm_correction fallback: %s", e)
 
             text = self._apply_replacements(text)
             elapsed = time.time() - start

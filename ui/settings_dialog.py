@@ -3,7 +3,7 @@
 import copy
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -168,6 +168,23 @@ _LANGUAGES = [
     ("ja", "Japanese"),
     ("ko", "Korean"),
 ]
+
+
+class LLMConvertThread(QThread):
+    """Скачивание и конвертация LLM модели в фоне."""
+
+    progress_msg = pyqtSignal(str)
+    finished_ok = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def run(self):
+        try:
+            from scripts.convert_llm import convert
+            self.progress_msg.emit("Скачивание и конвертация модели...")
+            convert()
+            self.finished_ok.emit()
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 class SettingsDialog(QDialog):
@@ -379,18 +396,137 @@ class SettingsDialog(QDialog):
 
     def _build_tab_postprocessing(self):
         tab = QWidget()
-        form = QFormLayout(tab)
+        layout = QVBoxLayout(tab)
+
+        # --- LLM group ---
+        llm_group = QGroupBox("LLM-коррекция")
+        llm_layout = QVBoxLayout(llm_group)
+
+        self._llm_check = QCheckBox("Использовать LLM для коррекции текста")
+        self._llm_check.toggled.connect(self._on_llm_toggled)
+        llm_layout.addWidget(self._llm_check)
+
+        self._llm_status_label = QLabel("")
+        self._llm_status_label.setStyleSheet("color: gray;")
+        llm_layout.addWidget(self._llm_status_label)
+
+        self._llm_download_btn = QPushButton("Скачать модель")
+        self._llm_download_btn.clicked.connect(self._on_llm_download)
+        self._llm_download_btn.hide()
+        llm_layout.addWidget(self._llm_download_btn)
+
+        self._llm_progress = QProgressBar()
+        self._llm_progress.setRange(0, 0)  # indeterminate
+        self._llm_progress.hide()
+        llm_layout.addWidget(self._llm_progress)
+
+        llm_hint = QLabel("Исправляет пунктуацию, капитализацию и ошибки. ~3 GB VRAM.")
+        llm_hint.setStyleSheet("color: gray; font-style: italic;")
+        llm_hint.setWordWrap(True)
+        llm_layout.addWidget(llm_hint)
+
+        layout.addWidget(llm_group)
+
+        # --- Regex group ---
+        regex_group = QGroupBox("Regex-обработка")
+        regex_layout = QVBoxLayout(regex_group)
 
         self._punct_check = QCheckBox("Нормализация пробелов вокруг знаков препинания")
-        form.addRow(self._punct_check)
+        regex_layout.addWidget(self._punct_check)
 
         self._capital_check = QCheckBox("Заглавная буква в начале и после .!?")
-        form.addRow(self._capital_check)
+        regex_layout.addWidget(self._capital_check)
 
         self._trailing_dot_check = QCheckBox("Добавлять точку в конце, если нет пунктуации")
-        form.addRow(self._trailing_dot_check)
+        regex_layout.addWidget(self._trailing_dot_check)
+
+        self._regex_disabled_hint = QLabel("При включённой LLM regex-обработка не используется")
+        self._regex_disabled_hint.setStyleSheet("color: orange; font-style: italic;")
+        self._regex_disabled_hint.hide()
+        regex_layout.addWidget(self._regex_disabled_hint)
+
+        layout.addWidget(regex_group)
+        layout.addStretch()
 
         self._tabs.addTab(tab, "Постобработка")
+
+        self._llm_convert_thread = None
+        self._update_llm_status()
+
+    # -- LLM helpers ------------------------------------------------------
+
+    def _update_llm_status(self):
+        """Обновить статус LLM-модели в UI."""
+        from core.llm_manager import LLMManager, MODELS_DIR
+        model_name = self._config.get('llm', 'model', default='qwen2.5-1.5b-ct2')
+        model_path = MODELS_DIR / model_name / "model.bin"
+        if model_path.exists():
+            self._llm_status_label.setText("Модель загружена")
+            self._llm_download_btn.hide()
+        else:
+            self._llm_status_label.setText("Модель не скачана")
+            self._llm_download_btn.show()
+            if self._llm_check.isChecked():
+                self._llm_check.setChecked(False)
+
+    def _on_llm_toggled(self, checked: bool):
+        """Переключение LLM — заблокировать regex-чекбоксы."""
+        from core.llm_manager import MODELS_DIR
+        model_name = self._config.get('llm', 'model', default='qwen2.5-1.5b-ct2')
+        model_exists = (MODELS_DIR / model_name / "model.bin").exists()
+
+        if checked and not model_exists:
+            reply = QMessageBox.question(
+                self,
+                "Скачать модель?",
+                "Для LLM-коррекции нужна модель Qwen2.5-1.5B (~3 GB).\nСкачать и конвертировать?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._on_llm_download()
+            else:
+                self._llm_check.setChecked(False)
+            return
+
+        self._punct_check.setEnabled(not checked)
+        self._capital_check.setEnabled(not checked)
+        self._trailing_dot_check.setEnabled(not checked)
+        self._regex_disabled_hint.setVisible(checked)
+
+    def _on_llm_download(self):
+        """Запустить скачивание + конвертацию LLM."""
+        if self._llm_convert_thread is not None and self._llm_convert_thread.isRunning():
+            QMessageBox.warning(self, "Конвертация", "Дождитесь завершения текущей конвертации")
+            return
+
+        self._llm_convert_thread = LLMConvertThread()
+        self._llm_convert_thread.progress_msg.connect(self._on_llm_progress_msg)
+        self._llm_convert_thread.finished_ok.connect(self._on_llm_convert_finished)
+        self._llm_convert_thread.error.connect(self._on_llm_convert_error)
+
+        self._llm_progress.show()
+        self._llm_download_btn.setEnabled(False)
+        self._llm_status_label.setText("Скачивание и конвертация...")
+        self._llm_convert_thread.start()
+
+    def _on_llm_progress_msg(self, msg: str):
+        self._llm_status_label.setText(msg)
+
+    def _on_llm_convert_finished(self):
+        self._llm_progress.hide()
+        self._llm_download_btn.setEnabled(True)
+        self._llm_convert_thread = None
+        self._update_llm_status()
+        self._llm_status_label.setText("Модель готова")
+        self._llm_check.setChecked(True)
+
+    def _on_llm_convert_error(self, msg: str):
+        self._llm_progress.hide()
+        self._llm_download_btn.setEnabled(True)
+        self._llm_convert_thread = None
+        self._llm_status_label.setText(f"Ошибка: {msg}")
+        self._llm_check.setChecked(False)
 
     # -- Tab 5: Dictionary ------------------------------------------------
 
@@ -586,9 +722,17 @@ class SettingsDialog(QDialog):
         self._vad_min_silence_spin.setValue(c.get("vad", "min_silence_ms", default=500))
 
         # Post-processing
+        self._llm_check.setChecked(c.get("llm", "enabled", default=False))
         self._punct_check.setChecked(c.get("postprocessing", "punctuation", default=True))
         self._capital_check.setChecked(c.get("postprocessing", "capitalization", default=True))
         self._trailing_dot_check.setChecked(c.get("postprocessing", "trailing_dot", default=True))
+
+        # Apply LLM toggle state to regex checkboxes
+        llm_on = c.get("llm", "enabled", default=False)
+        self._punct_check.setEnabled(not llm_on)
+        self._capital_check.setEnabled(not llm_on)
+        self._trailing_dot_check.setEnabled(not llm_on)
+        self._regex_disabled_hint.setVisible(llm_on)
 
         # Dictionary -- already loaded during build
 
@@ -624,6 +768,7 @@ class SettingsDialog(QDialog):
         vals["vad.min_silence_ms"] = self._vad_min_silence_spin.value()
 
         # Post-processing
+        vals["llm.enabled"] = self._llm_check.isChecked()
         vals["postprocessing.punctuation"] = self._punct_check.isChecked()
         vals["postprocessing.capitalization"] = self._capital_check.isChecked()
         vals["postprocessing.trailing_dot"] = self._trailing_dot_check.isChecked()
@@ -699,6 +844,7 @@ class SettingsDialog(QDialog):
         self.reject()
 
     def closeEvent(self, event):
+        # Check whisper model download
         if self._download_thread is not None and self._download_thread.isRunning():
             reply = QMessageBox.question(
                 self, "Скачивание",
@@ -711,6 +857,19 @@ class SettingsDialog(QDialog):
             self._download_thread.quit()
             self._download_thread.wait(3000)
             self._download_thread = None
+        # Check LLM conversion
+        if self._llm_convert_thread is not None and self._llm_convert_thread.isRunning():
+            reply = QMessageBox.question(
+                self, "Конвертация LLM",
+                "Конвертация LLM-модели в процессе. Прервать?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.No:
+                event.ignore()
+                return
+            self._llm_convert_thread.quit()
+            self._llm_convert_thread.wait(3000)
+            self._llm_convert_thread = None
         if self._has_unsaved_changes():
             reply = QMessageBox.question(
                 self,
@@ -781,6 +940,7 @@ class SettingsDialog(QDialog):
         self._vad_min_silence_spin.setValue(d["vad"]["min_silence_ms"])
 
     def _reset_postprocessing(self, d: dict):
+        self._llm_check.setChecked(d["llm"]["enabled"])
         self._punct_check.setChecked(d["postprocessing"]["punctuation"])
         self._capital_check.setChecked(d["postprocessing"]["capitalization"])
         self._trailing_dot_check.setChecked(d["postprocessing"]["trailing_dot"])
