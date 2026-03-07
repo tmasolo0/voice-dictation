@@ -440,10 +440,10 @@ class SettingsDialog(QDialog):
         self._trailing_dot_check = QCheckBox("Добавлять точку в конце, если нет пунктуации")
         regex_layout.addWidget(self._trailing_dot_check)
 
-        self._regex_disabled_hint = QLabel("При включённой LLM regex-обработка не используется")
-        self._regex_disabled_hint.setStyleSheet("color: orange; font-style: italic;")
-        self._regex_disabled_hint.hide()
-        regex_layout.addWidget(self._regex_disabled_hint)
+        self._regex_llm_hint = QLabel("Regex-обработка дополняет LLM-коррекцию")
+        self._regex_llm_hint.setStyleSheet("color: gray; font-style: italic;")
+        self._regex_llm_hint.hide()
+        regex_layout.addWidget(self._regex_llm_hint)
 
         layout.addWidget(regex_group)
         layout.addStretch()
@@ -489,10 +489,7 @@ class SettingsDialog(QDialog):
                 self._llm_check.setChecked(False)
             return
 
-        self._punct_check.setEnabled(not checked)
-        self._capital_check.setEnabled(not checked)
-        self._trailing_dot_check.setEnabled(not checked)
-        self._regex_disabled_hint.setVisible(checked)
+        self._regex_llm_hint.setVisible(checked)
 
     def _on_llm_download(self):
         """Запустить скачивание + конвертацию LLM."""
@@ -727,12 +724,8 @@ class SettingsDialog(QDialog):
         self._capital_check.setChecked(c.get("postprocessing", "capitalization", default=True))
         self._trailing_dot_check.setChecked(c.get("postprocessing", "trailing_dot", default=True))
 
-        # Apply LLM toggle state to regex checkboxes
-        llm_on = c.get("llm", "enabled", default=False)
-        self._punct_check.setEnabled(not llm_on)
-        self._capital_check.setEnabled(not llm_on)
-        self._trailing_dot_check.setEnabled(not llm_on)
-        self._regex_disabled_hint.setVisible(llm_on)
+        # Show hint if LLM is on
+        self._regex_llm_hint.setVisible(c.get("llm", "enabled", default=False))
 
         # Dictionary -- already loaded during build
 
