@@ -132,21 +132,31 @@ class LLMManager:
 
     @staticmethod
     def _validate_generator(generator, tokenizer) -> bool:
-        """Проверка что генератор выдаёт осмысленный результат, а не нули."""
+        """Проверка что генератор выдаёт осмысленный результат на chat template промпте."""
         try:
+            # Используем полный chat template — как при реальной коррекции
+            messages = [
+                {"role": "system", "content": "Fix punctuation. Return ONLY corrected text."},
+                {"role": "user", "content": "hello world how are you"},
+            ]
+            prompt = tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True,
+            )
             test_tokens = tokenizer.convert_ids_to_tokens(
-                tokenizer.encode("Hello, how are you?")
+                tokenizer.encode(prompt)
             )
             results = generator.generate_batch(
                 [test_tokens],
-                max_length=10,
+                max_length=20,
+                sampling_temperature=0.1,
+                repetition_penalty=1.1,
+                end_token=[tokenizer.eos_token_id],
                 include_prompt_in_result=False,
             )
             output_tokens = results[0].sequences[0]
             if not output_tokens:
                 return False
             output_ids = tokenizer.convert_tokens_to_ids(output_tokens)
-            # Если все id = 0 — модель генерирует мусор
             if all(i == 0 for i in output_ids):
                 return False
             return True
