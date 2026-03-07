@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## 2026-03-07 — v1.0.8
+- @Дмитрий — feat: HotkeyEdit поддерживает комбинации (Ctrl+Space, Shift+Tab, Ctrl+Tab)
+- @Дмитрий — feat: v1.0.7 — progress bars в frozen-app, LLM echo guard, PyInstaller фиксы
+
 ## 2026-03-07 — v1.0.6
 - @Дмитрий — feat: LLM-постобработка через Qwen2.5-1.5B (CTranslate2)
 - @Дмитрий — fix: LLM compute_type auto + CUDA DLL path, generate_batch API

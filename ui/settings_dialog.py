@@ -86,13 +86,21 @@ _SCAN_TO_MODIFIER = {
 
 
 class HotkeyEdit(QLineEdit):
-    """Custom widget that captures a hotkey (single key or combo) on click."""
+    """Custom widget that captures a hotkey (single key or combo) on click.
+
+    Three-phase capture:
+      1. Modifier pressed  -> show preview "ctrl+...", do NOT commit
+      2. Regular key pressed -> commit full combo "ctrl+space"
+      3. Modifier released alone -> commit modifier-only "left ctrl"
+    Tab/Shift+Tab intercepted in event() before Qt focus navigation.
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setReadOnly(True)
         self._hotkey = ""
         self._recording = False
+        self._held_mod_scan = 0  # native scan code of last modifier press
 
     def hotkey(self) -> str:
         return self._hotkey
@@ -101,17 +109,50 @@ class HotkeyEdit(QLineEdit):
         self._hotkey = value
         self.setText(value if value else "")
 
+    # -- helpers --------------------------------------------------------------
+
+    @staticmethod
+    def _mod_prefix(modifiers) -> list[str]:
+        parts = []
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
+            parts.append("ctrl")
+        if modifiers & Qt.KeyboardModifier.AltModifier:
+            parts.append("alt")
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            parts.append("shift")
+        return parts
+
+    def _commit(self, text: str):
+        self._hotkey = text
+        self._recording = False
+        self._held_mod_scan = 0
+        self.setText(text)
+        self.clearFocus()
+
     # -- events ---------------------------------------------------------------
 
     def focusInEvent(self, event):
         super().focusInEvent(event)
         self._recording = True
+        self._held_mod_scan = 0
         self.setText("Нажмите клавишу...")
 
     def focusOutEvent(self, event):
         super().focusOutEvent(event)
         self._recording = False
+        self._held_mod_scan = 0
         self.setText(self._hotkey if self._hotkey else "")
+
+    def event(self, event):
+        if self._recording and event.type() in (
+            event.Type.KeyPress, event.Type.ShortcutOverride,
+        ):
+            if event.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
+                if event.type() == event.Type.KeyPress:
+                    self._handle_regular_key(event)
+                event.accept()
+                return True
+        return super().event(event)
 
     def keyPressEvent(self, event):
         if not self._recording:
@@ -119,37 +160,37 @@ class HotkeyEdit(QLineEdit):
 
         key = event.key()
 
-        # Modifier-only: определить Left/Right через native scan code
         if key in _MODIFIER_KEYS:
-            scan = event.nativeScanCode()
-            mod_name = _SCAN_TO_MODIFIER.get(scan)
-            if mod_name is None:
-                return
-            self._hotkey = mod_name
-            self._recording = False
-            self.setText(mod_name)
-            self.clearFocus()
+            self._held_mod_scan = event.nativeScanCode()
+            prefix = self._mod_prefix(event.modifiers())
+            if prefix:
+                self.setText("+".join(prefix) + "+...")
             return
 
-        key_str = _QT_KEY_MAP.get(Qt.Key(key))
+        self._handle_regular_key(event)
+
+    def _handle_regular_key(self, event):
+        key = event.key()
+        if key == Qt.Key.Key_Backtab:
+            key_str = "tab"
+        else:
+            key_str = _QT_KEY_MAP.get(Qt.Key(key))
         if key_str is None:
             return
 
-        parts = []
-        mods = event.modifiers()
-        if mods & Qt.KeyboardModifier.ControlModifier:
-            parts.append("ctrl")
-        if mods & Qt.KeyboardModifier.AltModifier:
-            parts.append("alt")
-        if mods & Qt.KeyboardModifier.ShiftModifier:
-            parts.append("shift")
+        parts = self._mod_prefix(event.modifiers())
         parts.append(key_str)
+        self._commit("+".join(parts))
 
-        combo = "+".join(parts)
-        self._hotkey = combo
-        self._recording = False
-        self.setText(combo)
-        self.clearFocus()
+    def keyReleaseEvent(self, event):
+        if not self._recording:
+            return
+
+        if event.key() in _MODIFIER_KEYS:
+            scan = self._held_mod_scan or event.nativeScanCode()
+            mod_name = _SCAN_TO_MODIFIER.get(scan)
+            if mod_name:
+                self._commit(mod_name)
 
 
 
