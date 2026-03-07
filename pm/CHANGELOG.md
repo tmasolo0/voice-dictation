@@ -1,5 +1,13 @@
 # CHANGELOG.md
 
+## 2026-03-07 — v1.0.6
+- @Дмитрий — feat: LLM-постобработка через Qwen2.5-1.5B (CTranslate2)
+- @Дмитрий — fix: LLM compute_type auto + CUDA DLL path, generate_batch API
+- @Дмитрий — fix: LLM валидация compute_type + fallback на float32
+- @Дмитрий — fix: LLM валидация через chat template, float32 дефолт
+- @Дмитрий — fix: regex-процессоры работают вместе с LLM, а не вместо
+- @Дмитрий — docs: полный README с описанием двух режимов, настроек, VRAM
+
 ## 2026-03-03 — v1.0.4
 - @Дмитрий — fix: история диктовок не сохранялась (баг порядка сигналов: pipeline эмитил text_processed до установки _pending_metadata)
 - @Дмитрий — fix: застревание _recording флага в HotkeyManager — сброс при set_enabled(True), try/except + timeout в _poll_key_up
