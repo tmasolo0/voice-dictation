@@ -1,64 +1,58 @@
-"""Каталог моделей Whisper — метаданные, проверка наличия, хелперы."""
+"""Каталог моделей ASR — метаданные, проверка наличия, хелперы."""
 
 from core.config_manager import APP_DIR
 
 MODELS_DIR = APP_DIR / "models"
 
 MODEL_CATALOG = {
-    "large-v3-turbo": {
-        "repo_id": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
-        "size_gb": 1.51,
-        "description": "Turbo — быстрый, хорошее качество",
+    "qwen3-asr-1.7b": {
+        "repo_id": "andrewleech/Qwen3-ASR-1.7B-ONNX",
+        "size_gb": 2.7,
+        "description": "Quality (1.7B) — лучшее качество, 52 языка",
         "downloadable": True,
     },
-    "large-v3": {
-        "repo_id": "Systran/faster-whisper-large-v3",
-        "size_gb": 2.88,
-        "description": "Quality — лучшее качество, медленнее",
+    "qwen3-asr-0.6b": {
+        "repo_id": "andrewleech/Qwen3-ASR-0.6B-ONNX",
+        "size_gb": 1.3,
+        "description": "Fast (0.6B) — быстрый, компактный",
         "downloadable": True,
-    },
-    "medium": {
-        "repo_id": "Systran/faster-whisper-medium",
-        "size_gb": 1.43,
-        "description": "Medium — для перевода RU→EN",
-        "downloadable": True,
-    },
-    "whisper-podlodka-turbo": {
-        "repo_id": "bond005/whisper-podlodka-turbo",
-        "size_gb": 3.03,
-        "description": "RU Turbo — fine-tuned для русского (требует конвертации)",
-        "downloadable": False,
     },
 }
 
 ALLOW_PATTERNS = [
-    "config.json",
-    "preprocessor_config.json",
-    "model.bin",
-    "tokenizer.json",
-    "vocabulary.*",
+    "*.int4.onnx",
+    "*.int4.data",
+    "embed_tokens.bin",
+    "*.json",
 ]
 
 
+def _has_onnx_model(model_dir) -> bool:
+    """Проверяет наличие ONNX-файлов модели."""
+    return (
+        (model_dir / "encoder.int4.onnx").exists()
+        or (model_dir / "encoder.onnx").exists()
+        or (model_dir / "encoder_conv.onnx").exists()
+    )
+
+
 def is_model_downloaded(model_name: str) -> bool:
-    """Проверяет наличие скачанной модели по model.bin."""
-    return (MODELS_DIR / model_name / "model.bin").exists()
+    """Проверяет наличие скачанной модели."""
+    return _has_onnx_model(MODELS_DIR / model_name)
 
 
 def get_local_models() -> list[str]:
-    """Возвращает список имён моделей, у которых есть model.bin в MODELS_DIR."""
+    """Возвращает список имён скачанных моделей."""
     if not MODELS_DIR.exists():
         return []
     return [
         d.name
         for d in MODELS_DIR.iterdir()
-        if d.is_dir() and (d / "model.bin").exists()
+        if d.is_dir() and _has_onnx_model(d)
     ]
 
 
 MODEL_LABELS = {
-    'large-v3-turbo': 'Turbo',
-    'large-v3': 'Quality',
-    'medium': 'Medium',
-    'whisper-podlodka-turbo': 'RU Turbo',
+    'qwen3-asr-1.7b': 'Quality (1.7B)',
+    'qwen3-asr-0.6b': 'Fast (0.6B)',
 }

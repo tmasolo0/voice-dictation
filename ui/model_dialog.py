@@ -1,4 +1,4 @@
-"""ModelManagerDialog — UI для управления моделями Whisper."""
+"""ModelManagerDialog — UI для управления ASR-моделями."""
 
 from pathlib import Path
 
@@ -127,7 +127,7 @@ class ModelManagerDialog(QDialog):
 
     def _populate_table(self):
         """Заполнить таблицу моделями из каталога."""
-        active_model = self._config.get('recognition', 'model', default='large-v3')
+        active_model = self._config.get('recognition', 'model', default='qwen3-asr-1.7b')
         models = list(MODEL_CATALOG.items())
 
         self._table.setRowCount(len(models))

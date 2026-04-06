@@ -38,7 +38,7 @@ from core.audio_ducking import AudioDucker
 from ui.tray import TrayManager
 
 
-MODEL_DEFAULT = 'large-v3'
+MODEL_DEFAULT = 'qwen3-asr-1.7b'
 
 
 class Application:

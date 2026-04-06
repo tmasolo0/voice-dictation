@@ -1,9 +1,8 @@
-"""Recognizer — распознавание речи через Whisper."""
+"""Recognizer — распознавание речи через Qwen3-ASR."""
 
 import gc
 import logging
 import re
-import sys
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -24,10 +23,6 @@ _HALLUCINATION_WORDS = {
 
 # Фразы-галлюцинации (проверяются в коротких текстах <40 символов)
 _HALLUCINATION_PHRASES = [
-    "thanks for watching", "thank you for watching",
-    "thanks for listening", "thank you for listening",
-    "please subscribe", "like and subscribe",
-    "see you next time", "the end",
     "silence", "no speech", "inaudible",
     "[music]", "(music)", "[applause]", "[laughter]",
     "субтитры сделал", "субтитры выполнены",
@@ -35,9 +30,14 @@ _HALLUCINATION_PHRASES = [
     "продолжение следует",
 ]
 
+# Максимум терминов в system prompt
+# Qwen3-ASR int4: длинный prompt (~200+ tokens) мешает распознаванию.
+# 20 терминов ≈ 40-60 токенов — безопасный лимит.
+MAX_SYSTEM_PROMPT_TERMS = 20
+
 
 class Recognizer:
-    """Транскрипция аудио через faster-whisper."""
+    """Транскрипция аудио через Qwen3-ASR."""
 
     def __init__(self, event_bus, model_manager, config, llm_manager=None):
         self._bus = event_bus
@@ -70,6 +70,29 @@ class Recognizer:
                 self._busy = False
             self._bus.error_occurred.emit("Recognizer", str(e))
 
+    def _build_system_prompt(self, terms: list[str]) -> str | None:
+        """Построить system prompt с терминологией для ASR.
+
+        Args:
+            terms: список терминов из словарей
+
+        Returns:
+            System prompt строка или None если терминов нет.
+        """
+        # Пользовательский system prompt из настроек
+        user_prompt = self._config.get('recognition', 'system_prompt', default='') or ''
+
+        # Термины из словарей (ограничиваем количество)
+        if terms:
+            limited = terms[:MAX_SYSTEM_PROMPT_TERMS]
+            terms_str = ", ".join(limited)
+            terms_prompt = f"Термины: {terms_str}"
+        else:
+            terms_prompt = ""
+
+        parts = [p for p in [user_prompt.strip(), terms_prompt] if p]
+        return "\n".join(parts) if parts else None
+
     def _transcribe(self, audio_data):
         """Транскрипция аудио (фоновый поток)."""
         try:
@@ -79,75 +102,37 @@ class Recognizer:
                 return
 
             start = time.time()
-            beam_size = self._config.get('recognition', 'beam_size', default=5)
-            temperature = self._config.get('recognition', 'temperature', default=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-            use_hotwords = self._config.get('recognition', 'use_hotwords', default=True)
+
             llm_active = (self._llm and self._llm.is_ready
                           and self._config.get('llm', 'enabled', default=False))
 
-            # Когда LLM активна — hotwords НЕ передаём в Whisper (снижает галлюцинации),
-            # термины пойдут в LLM prompt. Когда LLM выключена — hotwords как раньше.
-            if use_hotwords and not llm_active:
-                hotwords = self._config.get_hotwords()
-            else:
-                hotwords = ""
+            # Термины для system prompt
+            use_hotwords = self._config.get('recognition', 'use_hotwords', default=True)
+            terms = self._config.get_terms_list() if use_hotwords else []
 
-            terms = self._config.get_terms_list() if (use_hotwords and llm_active) else []
+            # Термины для LLM (если LLM активна)
+            llm_terms = terms if llm_active else []
+
+            # System prompt для ASR
+            system_prompt = self._build_system_prompt(terms)
 
             language = self._config.get('recognition', 'language', default=None)
             if not language or language == 'auto':
                 language = None
-            initial_prompt = self._config.get('recognition', 'initial_prompt', default='') or None
 
-            log.info("transcribe_params: lang=%s temperature=%s beam=%d model=%s frozen=%s",
-                     language, temperature, beam_size,
-                     self._models.model_name, getattr(sys, 'frozen', False))
+            log.info("transcribe: lang=%s model=%s system_prompt=%s",
+                     language, self._models.model_name,
+                     f"'{system_prompt[:50]}...'" if system_prompt and len(system_prompt) > 50
+                     else repr(system_prompt))
 
-            vad_params = {
-                'threshold': self._config.get('vad', 'threshold', default=0.5),
-                'min_speech_duration_ms': self._config.get('vad', 'min_speech_ms', default=250),
-                'min_silence_duration_ms': self._config.get('vad', 'min_silence_ms', default=500),
-            }
-
-            segments, info = model.transcribe(
+            # Qwen3-ASR: единый вызов transcribe
+            result = model.transcribe(
                 audio_data,
                 language=language,
-                vad_filter=True,
-                vad_parameters=vad_params,
-                initial_prompt=initial_prompt,
-                hotwords=hotwords or None,
-                condition_on_previous_text=self._config.get('recognition', 'condition_on_previous_text', default=False),
-                beam_size=beam_size,
-                temperature=temperature,
-                compression_ratio_threshold=self._config.get('recognition', 'compression_ratio_threshold', default=2.4),
-                log_prob_threshold=self._config.get('recognition', 'log_prob_threshold', default=-1.0),
-                no_speech_threshold=self._config.get('recognition', 'no_speech_threshold', default=0.6),
-                repetition_penalty=self._config.get('recognition', 'repetition_penalty', default=1.2),
-                no_repeat_ngram_size=self._config.get('recognition', 'no_repeat_ngram_size', default=3),
-                suppress_tokens=self._config.get('recognition', 'suppress_tokens', default=[-1]),
-                hallucination_silence_threshold=self._config.get('recognition', 'hallucination_silence_threshold', default=2.0),
+                system_prompt=system_prompt,
             )
 
-            # Фильтрация сегментов по качеству (защита от галлюцинаций)
-            no_speech_thr = self._config.get('recognition', 'no_speech_threshold', default=0.6)
-            logprob_thr = self._config.get('recognition', 'log_prob_threshold', default=-1.0)
-            compress_thr = self._config.get('recognition', 'compression_ratio_threshold', default=2.4)
-
-            filtered_texts = []
-            for s in segments:
-                if s.no_speech_prob > no_speech_thr:
-                    log.debug("skip segment no_speech=%.2f logprob=%.2f: '%s'",
-                              s.no_speech_prob, s.avg_logprob, s.text[:60])
-                    continue
-                if s.avg_logprob < logprob_thr:
-                    log.debug("skip segment logprob=%.2f: '%s'", s.avg_logprob, s.text[:60])
-                    continue
-                if s.compression_ratio > compress_thr:
-                    log.debug("skip segment compress=%.1f: '%s'", s.compression_ratio, s.text[:60])
-                    continue
-                filtered_texts.append(s.text)
-
-            text = "".join(filtered_texts).strip()
+            text = result.text.strip()
 
             if text and self._is_hallucination(text):
                 log.warning("hallucination filtered: '%s'", text[:100])
@@ -156,7 +141,7 @@ class Recognizer:
             # LLM-коррекция (если включена и модель загружена)
             if text and llm_active:
                 try:
-                    corrected = self._llm.correct(text, terms=terms or None)
+                    corrected = self._llm.correct(text, terms=llm_terms or None)
                     log.info("llm_correction: '%s' -> '%s'", text[:60], corrected[:60])
                     text = corrected
                 except Exception as e:
@@ -166,13 +151,10 @@ class Recognizer:
             elapsed = time.time() - start
 
             metadata = {
-                'language': info.language,
-                'language_probability': info.language_probability,
+                'language': result.language,
+                'language_probability': result.language_probability,
                 'elapsed': elapsed,
             }
-
-            # Очистка ссылок на результаты transcribe
-            del segments, info
 
             log.info("[%.1fс] lang=%s text='%s'", elapsed, metadata['language'], text[:100] if text else '')
 
@@ -200,7 +182,7 @@ class Recognizer:
         return text
 
     def _is_hallucination(self, text):
-        """Детекция типичных шаблонов галлюцинаций Whisper."""
+        """Детекция типичных шаблонов галлюцинаций."""
         stripped = text.strip()
         if len(stripped) < 3:
             return True

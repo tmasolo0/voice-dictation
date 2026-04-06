@@ -9,31 +9,37 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 block_cipher = None
 ROOT = os.path.abspath('.')
 
-# CTranslate2 нужны .dll / .so рядом с модулем
+# CTranslate2 нужны .dll / .so рядом с модулем (для LLM)
 ct2_binaries = collect_dynamic_libs('ctranslate2')
 
-# faster-whisper assets (silero_vad_v6.onnx)
-fw_assets = collect_data_files('faster_whisper', includes=['assets/*'])
+# ONNX Runtime DLLs (для ASR)
+try:
+    ort_binaries = collect_dynamic_libs('onnxruntime')
+except Exception:
+    ort_binaries = []
 
 a = Analysis(
     ['dictation.pyw'],
     pathex=[ROOT],
-    binaries=ct2_binaries,
+    binaries=ct2_binaries + ort_binaries,
     datas=[
         ('VERSION', '.'),
         ('dictionary.txt', '.'),
         ('dictionaries', 'dictionaries'),
         ('Ava.jpg', '.'),
         ('assets/sounds', 'assets/sounds'),
+        ('assets/silero_vad.onnx', 'assets'),
         ('README.md', '.'),
-    ] + fw_assets,
+    ],
     hiddenimports=[
         # PyQt6
         'PyQt6', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets',
         # Audio
         'sounddevice', '_sounddevice_data', 'numpy',
-        # Whisper / CTranslate2
-        'ctranslate2', 'faster_whisper',
+        # ASR (Qwen3-ASR ONNX)
+        'onnxruntime', 'tokenizers', 'librosa', 'soundfile',
+        # LLM (CTranslate2)
+        'ctranslate2',
         'huggingface_hub', 'huggingface_hub.utils', 'huggingface_hub.utils.tqdm',
         'tqdm',
         # Input
@@ -43,6 +49,7 @@ a = Analysis(
         # App modules
         'core', 'core.config_manager', 'core.recognizer', 'core.hotkeys',
         'core.tray', 'core.model_manager', 'core.model_catalog',
+        'core.asr_backend', 'core.qwen3_asr', 'core.vad',
         'core.history_manager', 'core.event_bus',
         'app', 'settings_dialog',
         # LLM conversion (dynamic imports in settings_dialog.py / convert_llm.py)

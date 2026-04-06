@@ -1,11 +1,55 @@
+# Приоритет: первые 20 → system prompt ASR (из реальных проектов C:\Project\)
+API
+Claude Desktop
+Docker
+Docker Compose
+Docker Desktop
+Python
+FastAPI
+n8n
+Next.js
+pytest
+PostgreSQL
+FHE
+Telegram
+Qdrant
+Redis
+Pydantic
+GitHub
 Claude Code
+CUDA
+Whisper
+# Остальные термины из проектов C:\Project\
+YooKassa
+MinIO
+Bybit
+WebDAV
+Gitea
+Telethon
+LangGraph
+Qdrant
+Ollama
+FPGA
+Concrete-ML
+Replicate
+FASHN
+Framer Motion
+Pandoc
 VS Code
-Visual Studio Code
-IntelliJ
-PyCharm
-WebStorm
-Vim
-Neovim
+Claude Desktop
+Claude CLI
+ChatGPT
+GPT-4o
+Kubernetes
+GitHub Copilot
+GraphQL
+gRPC
+WebSocket
+PyTorch
+CUDA
+ONNX
+Hugging Face
+LangChain
 Git
 GitHub
 GitLab
@@ -39,6 +83,12 @@ PHP
 Lua
 Bash
 PowerShell
+IntelliJ
+PyCharm
+WebStorm
+Vim
+Neovim
+Visual Studio Code
 React
 Vue
 Angular

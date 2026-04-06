@@ -36,4 +36,6 @@ def mock_config():
     cfg = MagicMock()
     cfg.get.return_value = None
     cfg.get_hotwords.return_value = ""
+    cfg.get_terms_list.return_value = []
+    cfg.get_replacements.return_value = {}
     return cfg

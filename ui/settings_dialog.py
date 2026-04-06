@@ -96,11 +96,11 @@ class HotkeyEdit(QLineEdit):
     """
 
     def __init__(self, parent=None):
+        self._recording = False  # до super().__init__() — Qt шлёт events в конструкторе
+        self._hotkey = ""
+        self._held_mod_scan = 0  # native scan code of last modifier press
         super().__init__(parent)
         self.setReadOnly(True)
-        self._hotkey = ""
-        self._recording = False
-        self._held_mod_scan = 0  # native scan code of last modifier press
 
     def hotkey(self) -> str:
         return self._hotkey
@@ -262,7 +262,7 @@ class LLMConvertThread(QThread):
 class SettingsDialog(QDialog):
     """Tabbed settings dialog with 5 tabs and OK/Cancel/Reset to Defaults."""
 
-    RESTART_KEYS = {"recognition.device", "recognition.compute_type"}
+    RESTART_KEYS = {"recognition.device"}
 
     def __init__(self, config: ConfigManager, parent=None):
         super().__init__(parent)
@@ -374,70 +374,25 @@ class SettingsDialog(QDialog):
         self._device_combo.addItem("CPU", "cpu")
         model_form.addRow("Устройство \u2605:", self._device_combo)
 
-        self._compute_combo = QComboBox()
-        for val in ("float16", "int8_float16", "int8"):
-            self._compute_combo.addItem(val, val)
-        model_form.addRow("Точность \u2605:", self._compute_combo)
-
         restart_label = QLabel("\u2605 = требует перезапуск")
         restart_label.setStyleSheet("color: gray; font-style: italic;")
         model_form.addRow(restart_label)
 
         outer.addWidget(model_group)
 
-        # --- Quality group ---
-        quality_group = QGroupBox("Параметры качества")
-        qf = QFormLayout(quality_group)
+        # --- System Prompt group ---
+        prompt_group = QGroupBox("System Prompt")
+        pf = QFormLayout(prompt_group)
 
-        self._beam_size_spin = QSpinBox()
-        self._beam_size_spin.setRange(1, 10)
-        qf.addRow("Ширина поиска (beam):", self._beam_size_spin)
-        qf.addRow("", QLabel("Ширина beam search (больше = точнее, медленнее)"))
+        self._system_prompt_edit = QLineEdit()
+        self._system_prompt_edit.setPlaceholderText("Дополнительные инструкции для ASR (необязательно)")
+        pf.addRow("Промпт:", self._system_prompt_edit)
+        prompt_hint = QLabel("Термины из словарей добавляются автоматически. Здесь — дополнительные инструкции.")
+        prompt_hint.setStyleSheet("color: gray;")
+        prompt_hint.setWordWrap(True)
+        pf.addRow("", prompt_hint)
 
-        self._condition_prev_check = QCheckBox("Использовать предыдущий сегмент как контекст")
-        qf.addRow("", self._condition_prev_check)
-
-        self._compression_spin = QDoubleSpinBox()
-        self._compression_spin.setRange(1.0, 5.0)
-        self._compression_spin.setSingleStep(0.1)
-        self._compression_spin.setDecimals(1)
-        qf.addRow("Порог сжатия:", self._compression_spin)
-        qf.addRow("", QLabel("Порог сжатия — фильтр повторяющегося текста"))
-
-        self._log_prob_spin = QDoubleSpinBox()
-        self._log_prob_spin.setRange(-5.0, 0.0)
-        self._log_prob_spin.setSingleStep(0.1)
-        self._log_prob_spin.setDecimals(1)
-        qf.addRow("Порог вероятности:", self._log_prob_spin)
-        qf.addRow("", QLabel("Порог вероятности — фильтр низкой уверенности"))
-
-        self._no_speech_spin = QDoubleSpinBox()
-        self._no_speech_spin.setRange(0.0, 1.0)
-        self._no_speech_spin.setSingleStep(0.1)
-        self._no_speech_spin.setDecimals(1)
-        qf.addRow("Порог тишины:", self._no_speech_spin)
-        qf.addRow("", QLabel("Порог тишины — пропуск тихих сегментов"))
-
-        self._repetition_spin = QDoubleSpinBox()
-        self._repetition_spin.setRange(1.0, 3.0)
-        self._repetition_spin.setSingleStep(0.1)
-        self._repetition_spin.setDecimals(1)
-        qf.addRow("Штраф повтора:", self._repetition_spin)
-        qf.addRow("", QLabel("Штраф за повторение (>1.0 = штраф)"))
-
-        self._no_repeat_ngram_spin = QSpinBox()
-        self._no_repeat_ngram_spin.setRange(0, 10)
-        qf.addRow("Размер N-грамм:", self._no_repeat_ngram_spin)
-        qf.addRow("", QLabel("Запрет повтора N-грамм подряд"))
-
-        self._hallucination_spin = QDoubleSpinBox()
-        self._hallucination_spin.setRange(0.0, 10.0)
-        self._hallucination_spin.setSingleStep(0.5)
-        self._hallucination_spin.setDecimals(1)
-        qf.addRow("Фильтр галлюцинаций:", self._hallucination_spin)
-        qf.addRow("", QLabel("Фильтр галлюцинаций на тишине (секунды)"))
-
-        outer.addWidget(quality_group)
+        outer.addWidget(prompt_group)
 
         # --- VAD group ---
         vad_group = QGroupBox("VAD (детектор речи)")
@@ -801,19 +756,7 @@ class SettingsDialog(QDialog):
         if idx >= 0:
             self._device_combo.setCurrentIndex(idx)
 
-        compute = c.get("recognition", "compute_type", default="float16")
-        idx = self._compute_combo.findData(compute)
-        if idx >= 0:
-            self._compute_combo.setCurrentIndex(idx)
-
-        self._beam_size_spin.setValue(c.get("recognition", "beam_size", default=5))
-        self._condition_prev_check.setChecked(c.get("recognition", "condition_on_previous_text", default=False))
-        self._compression_spin.setValue(c.get("recognition", "compression_ratio_threshold", default=2.4))
-        self._log_prob_spin.setValue(c.get("recognition", "log_prob_threshold", default=-1.0))
-        self._no_speech_spin.setValue(c.get("recognition", "no_speech_threshold", default=0.6))
-        self._repetition_spin.setValue(c.get("recognition", "repetition_penalty", default=1.2))
-        self._no_repeat_ngram_spin.setValue(c.get("recognition", "no_repeat_ngram_size", default=3))
-        self._hallucination_spin.setValue(c.get("recognition", "hallucination_silence_threshold", default=2.0))
+        self._system_prompt_edit.setText(c.get("recognition", "system_prompt", default=""))
 
         # VAD
         self._vad_threshold_spin.setValue(c.get("vad", "threshold", default=0.5))
@@ -847,15 +790,7 @@ class SettingsDialog(QDialog):
         # Recognition
         vals["recognition.model"] = self._model_combo.currentData()
         vals["recognition.device"] = self._device_combo.currentData()
-        vals["recognition.compute_type"] = self._compute_combo.currentData()
-        vals["recognition.beam_size"] = self._beam_size_spin.value()
-        vals["recognition.condition_on_previous_text"] = self._condition_prev_check.isChecked()
-        vals["recognition.compression_ratio_threshold"] = self._compression_spin.value()
-        vals["recognition.log_prob_threshold"] = self._log_prob_spin.value()
-        vals["recognition.no_speech_threshold"] = self._no_speech_spin.value()
-        vals["recognition.repetition_penalty"] = self._repetition_spin.value()
-        vals["recognition.no_repeat_ngram_size"] = self._no_repeat_ngram_spin.value()
-        vals["recognition.hallucination_silence_threshold"] = self._hallucination_spin.value()
+        vals["recognition.system_prompt"] = self._system_prompt_edit.text()
 
         # VAD
         vals["vad.threshold"] = self._vad_threshold_spin.value()
@@ -1017,18 +952,7 @@ class SettingsDialog(QDialog):
         if idx >= 0:
             self._device_combo.setCurrentIndex(idx)
 
-        idx = self._compute_combo.findData(d["recognition"]["compute_type"])
-        if idx >= 0:
-            self._compute_combo.setCurrentIndex(idx)
-
-        self._beam_size_spin.setValue(d["recognition"]["beam_size"])
-        self._condition_prev_check.setChecked(d["recognition"]["condition_on_previous_text"])
-        self._compression_spin.setValue(d["recognition"]["compression_ratio_threshold"])
-        self._log_prob_spin.setValue(d["recognition"]["log_prob_threshold"])
-        self._no_speech_spin.setValue(d["recognition"]["no_speech_threshold"])
-        self._repetition_spin.setValue(d["recognition"]["repetition_penalty"])
-        self._no_repeat_ngram_spin.setValue(d["recognition"]["no_repeat_ngram_size"])
-        self._hallucination_spin.setValue(d["recognition"]["hallucination_silence_threshold"])
+        self._system_prompt_edit.setText(d["recognition"].get("system_prompt", ""))
 
         self._vad_threshold_spin.setValue(d["vad"]["threshold"])
         self._vad_min_speech_spin.setValue(d["vad"]["min_speech_ms"])

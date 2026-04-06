@@ -1,8 +1,9 @@
-"""ModelManager — управление моделью Whisper."""
+"""ModelManager — управление ASR-моделью (Qwen3-ASR ONNX)."""
 
 import logging
 import threading
-from faster_whisper import WhisperModel
+
+from core.qwen3_asr import Qwen3ASRBackend
 
 log = logging.getLogger(__name__)
 
@@ -12,7 +13,7 @@ MODELS_DIR = APP_DIR / "models"
 
 
 class ModelManager:
-    """Загрузка и потокобезопасный доступ к модели Whisper."""
+    """Загрузка и потокобезопасный доступ к ASR-модели."""
 
     def __init__(self, event_bus, config):
         self._bus = event_bus
@@ -29,13 +30,13 @@ class ModelManager:
     def is_ready(self) -> bool:
         return self._model is not None
 
-    def get_model(self):
+    def get_model(self) -> Qwen3ASRBackend | None:
         """Получить модель под блокировкой. Возвращает None если не загружена."""
         with self._lock:
             return self._model
 
     def load_model(self, model_name: str):
-        """Загрузить модель в фоновом потоке (только при старте)."""
+        """Загрузить модель в фоновом потоке."""
         if self._model_name == model_name and self._model is not None:
             return
         self._bus.model_load_started.emit(model_name)
@@ -45,10 +46,13 @@ class ModelManager:
     def _get_free_vram() -> int | None:
         """Свободная VRAM в байтах (None если CUDA недоступна)."""
         try:
-            import torch
-            if torch.cuda.is_available():
-                free, _total = torch.cuda.mem_get_info()
-                return free
+            import onnxruntime as ort
+            if 'CUDAExecutionProvider' in ort.get_available_providers():
+                # Пробуем через torch если доступен
+                import torch
+                if torch.cuda.is_available():
+                    free, _total = torch.cuda.mem_get_info()
+                    return free
         except ImportError:
             pass
         return None
@@ -59,7 +63,6 @@ class ModelManager:
             log.info("Загрузка модели %s...", model_name)
 
             device = self._config.get('recognition', 'device', default='cuda')
-            compute_type = self._config.get('recognition', 'compute_type', default='float16')
 
             local_path = MODELS_DIR / model_name
             model_path = str(local_path) if local_path.exists() else model_name
@@ -67,13 +70,20 @@ class ModelManager:
 
             free_before = self._get_free_vram() if device == 'cuda' else None
 
-            new_model = WhisperModel(model_path, device=device, compute_type=compute_type)
+            # Выгрузить предыдущую модель
+            with self._lock:
+                if self._model is not None:
+                    self._model.unload()
+                    self._model = None
+
+            backend = Qwen3ASRBackend()
+            backend.load(model_path, device=device)
 
             with self._lock:
-                self._model = new_model
+                self._model = backend
                 self._model_name = model_name
 
-            # Замер VRAM, потреблённой моделью
+            # Замер VRAM
             if free_before is not None:
                 free_after = self._get_free_vram()
                 if free_after is not None:

@@ -22,7 +22,7 @@ CONFIG_FILE = APP_DIR / "config.json"
 DICTIONARY_FILE = BUNDLE_DIR / "dictionary.txt"
 DICTIONARIES_DIR = BUNDLE_DIR / "dictionaries"
 REPLACEMENTS_FILE = APP_DIR / "replacements.json"
-CONFIG_VERSION = 15
+CONFIG_VERSION = 16
 
 DEFAULT_CONFIG = {
     "version": CONFIG_VERSION,
@@ -38,30 +38,18 @@ DEFAULT_CONFIG = {
     },
     "recognition": {
         "hotkey": "left ctrl",
-        "model": "large-v3",
+        "model": "qwen3-asr-1.7b",
         "device": "cuda",
-        "compute_type": "float16",
         "language": "ru",
-        "initial_prompt": "",                    # Контекст для декодера (короткая фраза, НЕ список терминов)
-        "use_hotwords": True,                    # Использовать hotwords из словарей (может вызывать галлюцинации)
-        # --- Параметры качества транскрипции ---
-        "beam_size": 5,                         # Ширина beam search (больше = точнее, медленнее)
-        "temperature": [0.0, 0.2, 0.4, 0.6, 0.8, 1.0],  # Temperature fallback (начинает с greedy, повышает при плохих метриках)
-        "condition_on_previous_text": False,     # Контекст предыдущего сегмента (False для push-to-talk)
-        "compression_ratio_threshold": 2.4,     # Порог сжатия — фильтр повторяющегося текста
-        "log_prob_threshold": -1.0,             # Порог логарифма вероятности — фильтр низкой уверенности
-        "no_speech_threshold": 0.6,             # Порог «нет речи» — пропуск тихих сегментов
-        "repetition_penalty": 1.2,              # Штраф за повторение токенов (>1.0 = штраф)
-        "no_repeat_ngram_size": 3,              # Запрет повтора N-грамм подряд
-        "suppress_tokens": [-1],                # Подавление не-речевых токенов (-1 = дефолтный набор)
-        "hallucination_silence_threshold": 2.0, # Фильтр галлюцинаций на тишине (секунды)
+        "system_prompt": "",                    # System prompt для ASR (термины, инструкции)
+        "use_hotwords": True,                   # Использовать термины из словарей в system prompt
         "vram_cleanup_interval": 10,
         "audio_gain": 1.0
     },
     "vad": {
-        "threshold": 0.5,
-        "min_speech_ms": 250,
-        "min_silence_ms": 500
+        "threshold": 0.35,
+        "min_speech_ms": 150,
+        "min_silence_ms": 300
     },
     "dictionaries": {
         "active": ["it"]
@@ -159,6 +147,26 @@ class ConfigManager:
                 self._config.pop("preview", None)
                 self._config.pop("history", None)
                 self._config.get("widget", {}).pop("hide_in_fullscreen", None)
+            # v15 → v16: Whisper → Qwen3-ASR, удалены Whisper-специфичные параметры
+            if old_version < 16:
+                rec = self._config.get("recognition", {})
+                # Удаляем Whisper-параметры
+                whisper_keys = [
+                    "compute_type", "initial_prompt", "beam_size", "temperature",
+                    "condition_on_previous_text", "compression_ratio_threshold",
+                    "log_prob_threshold", "no_speech_threshold", "repetition_penalty",
+                    "no_repeat_ngram_size", "suppress_tokens", "hallucination_silence_threshold",
+                ]
+                for k in whisper_keys:
+                    rec.pop(k, None)
+                # Маппинг старых моделей на новую
+                old_model = rec.get("model", "")
+                if old_model in ("large-v3", "large-v3-turbo", "medium", "whisper-podlodka-turbo"):
+                    rec["model"] = "qwen3-asr-1.7b"
+                # Добавляем system_prompt если нет
+                if "system_prompt" not in rec:
+                    rec["system_prompt"] = ""
+                print("Миграция: Whisper → Qwen3-ASR, модель переключена на qwen3-asr-1.7b")
             self._config["version"] = CONFIG_VERSION
             self.save()
             print(f"Конфиг мигрирован на версию {CONFIG_VERSION}")
